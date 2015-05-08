@@ -84,7 +84,7 @@
 //   Building this composite shapes takes the following line :
 //      TGeoCompositeShape *cs1 = new TGeoCompositeShape("CS1", "A+B+C");
 //
-// 2.      (A+B)\(C+D)
+// 2.      (A+B)-(C+D)
 //   This expression means: subtract the union of C and D from the union of A and
 // B. The usage of paranthesys to force operator precedence is always recommended.
 // The representation of the corresponding composite shape looks like:
@@ -93,13 +93,13 @@
 //                                  |
 //                       [A+B] = (+)
 //                      |           |
-//   [(A+B)\(C+D)] = (\)           C B
+//   [(A+B)-(C+D)] = (-)           C B
 //                      |         |
 //                       [C+D]=(+)
 //                                |
 //                                 D
 //
-//      TGeoCompositeShape *cs2 = new TGeoCompositeShape("CS2", "(A+B)\(C+D)");
+//      TGeoCompositeShape *cs2 = new TGeoCompositeShape("CS2", "(A+B)-(C+D)");
 //
 //   Building composite shapes as in the 2 examples above is not always quite
 // usefull since we were using unpositioned shapes. When suplying just shape
@@ -112,9 +112,9 @@
 // properly substituted during parsing.
 //   Let's look at the code implementing the second example :
 //
-//      TGeoTranslation *t1 = new TGeoTranslation("T1",0,0,-20);
-//      TGeoTranslation *t2 = new TGeoTranslation("T2",0,0, 20);
-//      TGeoRotation *r1 = new TGeoRotation("R1"); // transformations need names
+//      TGeoTranslation *t1 = new TGeoTranslation("t1",0,0,-20);
+//      TGeoTranslation *t2 = new TGeoTranslation("t2",0,0, 20);
+//      TGeoRotation *r1 = new TGeoRotation("r1"); // transformations need names
 //      r1->SetAngles(90,30,90,120,0,0); // rotation with 30 degrees about Z
 //      TGeoTube *a = new TGeoTube(0, 10,20);
 //      a->SetName("A");                 // shapes need names too
@@ -126,7 +126,7 @@
 //      d->SetName("D");
 //
 //      TGeoCompositeShape *cs;
-//      cs = new TGeoCompositeShape("CS", "(A:t1+B:t2)\(C+D:r1)");
+//      cs = new TGeoCompositeShape("CS", "(A:t1+B:t2)-(C+D:r1)");
 //
 //   The newly created composite looks like 2 cylinders of different radii sitting
 // one on top of the other and having 2 rectangular holes : a longitudinal one

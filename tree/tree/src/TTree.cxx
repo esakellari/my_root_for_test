@@ -1219,10 +1219,12 @@ Long64_t TTree::AutoSave(Option_t* option)
    //
    //   When large Trees are produced, it is safe to activate the AutoSave
    //   procedure. Some branches may have buffers holding many entries.
-   //   AutoSave is automatically called by TTree::Fill when the number of bytes
-   //   generated since the previous AutoSave is greater than fAutoSave bytes.
-   //   This function may also be invoked by the user, for example every
-   //   N entries.
+   //   If fAutoSave is negative, AutoSave is automatically called by
+   //   TTree::Fill when the number of bytes generated since the previous
+   //   AutoSave is greater than -fAutoSave bytes.
+   //   If fAutoSave is positive, AutoSave is automatically called by
+   //   TTree::Fill every N entries.
+   //   This function may also be invoked by the user.
    //   Each AutoSave generates a new key on the file.
    //   Once the key with the tree header has been written, the previous cycle
    //   (if any) is deleted.
@@ -2220,7 +2222,7 @@ TBranch* TTree::BronchExec(const char* name, const char* classname, void* addr, 
          return 0;
       }
       if ((splitlevel > 0) && inklass && (inklass->GetCollectionProxy() == 0)) {
-         Int_t stl = -TClassEdit::IsSTLCont(cl->GetName(), 0);
+         ROOT::ESTLType stl = cl->GetCollectionType();
          if ((stl != ROOT::kSTLmap) && (stl != ROOT::kSTLmultimap)) {
             if (!inklass->HasDataMemberInfo()) {
                Error("Bronch", "Container with no dictionary defined in branch: %s", name);
@@ -6014,7 +6016,7 @@ Bool_t TTree::MemoryFull(Int_t nbytes)
 }
 
 //______________________________________________________________________________
-TTree* TTree::MergeTrees(TList* li, Option_t* /* option */)
+TTree* TTree::MergeTrees(TList* li, Option_t* options)
 {
    // Static function merging the trees in the TList into a new tree.
    //
@@ -6047,14 +6049,10 @@ TTree* TTree::MergeTrees(TList* li, Option_t* /* option */)
       }
 
       newtree->CopyAddresses(tree);
-      for (Long64_t i=0;i<nentries;i++) {
-         tree->GetEntry(i);
-         newtree->Fill();
-      }
+
+      newtree->CopyEntries(tree,-1,options);
+
       tree->ResetBranchAddresses(); // Disconnect from new tree.
-      if (newtree->GetTreeIndex()) {
-         newtree->GetTreeIndex()->Append(tree->GetTreeIndex(),kTRUE);
-      }
    }
    if (newtree && newtree->GetTreeIndex()) {
       newtree->GetTreeIndex()->Append(0,kFALSE); // Force the sorting
@@ -6063,7 +6061,7 @@ TTree* TTree::MergeTrees(TList* li, Option_t* /* option */)
 }
 
 //______________________________________________________________________________
-Long64_t TTree::Merge(TCollection* li, Option_t* /* option */)
+Long64_t TTree::Merge(TCollection* li, Option_t *options)
 {
    // Merge the trees in the TList into this tree.
    //
@@ -6091,17 +6089,10 @@ Long64_t TTree::Merge(TCollection* li, Option_t* /* option */)
       if (nentries == 0) continue;
 
       CopyAddresses(tree);
-      for (Long64_t i=0; i<nentries ; i++) {
-         tree->GetEntry(i);
-         Fill();
-      }
-      if (GetTreeIndex()) {
-         GetTreeIndex()->Append(tree->GetTreeIndex(),kTRUE);
-      }
+
+      CopyEntries(tree,-1,options);
+
       tree->ResetBranchAddresses();
-   }
-   if (GetTreeIndex()) {
-      GetTreeIndex()->Append(0,kFALSE); // Force the sorting
    }
    fAutoSave = storeAutoSave;
    return GetEntries();
@@ -6154,6 +6145,8 @@ Long64_t TTree::Merge(TCollection* li, TFileMergeInfo *info)
       CopyAddresses(tree);
 
       CopyEntries(tree,-1,options);
+
+      tree->ResetBranchAddresses();
    }
    fAutoSave = storeAutoSave;
    return GetEntries();
@@ -7299,9 +7292,13 @@ void TTree::SetAutoFlush(Long64_t autof /* = -30000000 */ )
 void TTree::SetAutoSave(Long64_t autos)
 {
    //This function may be called at the start of a program to change
-   //the default value for fAutoSave(300000000, ie 300 MBytes).
+   //the default value for fAutoSave (and for SetAutoSave) is -300000000, ie 300 MBytes
    //When filling the Tree the branch buffers as well as the Tree header
-   //will be flushed to disk when more than fAutoSave bytes have been written to the file.
+   //will be flushed to disk when the watermark is reached.
+   //If fAutoSave is positive the watermark is reached when a multiple of fAutoSave
+   //entries have been written.
+   //If fAutoSave is negative the watermark is reached when -fAutoSave bytes
+   //have been written to the file.
    //In case of a program crash, it will be possible to recover the data in the Tree
    //up to the last AutoSave point.
 

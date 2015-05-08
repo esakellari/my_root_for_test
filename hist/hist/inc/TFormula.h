@@ -74,6 +74,12 @@ public:
    }
 };
 
+// Functor defining the parameter order
+struct TFormulaParamOrder {
+   // comparison function
+   bool operator() (const TString& a, const TString& b) const;
+};
+
 
 class TFormula : public TNamed
 {
@@ -104,7 +110,7 @@ protected:
 
    std::list<TFormulaFunction>         fFuncs;    //!
    std::map<TString,TFormulaVariable>  fVars;     //!  list of  variable names
-   std::map<TString,Int_t>             fParams;   //!  list of  parameter names
+   std::map<TString,Int_t,TFormulaParamOrder>   fParams;   //  list of  parameter names
    std::map<TString,Double_t>          fConsts;   //!
    std::map<TString,TString>           fFunctionsShortcuts;  //!
    TString                        fFormula;
@@ -120,11 +126,12 @@ protected:
    void   PreProcessFormula(TString &formula);
    void   ProcessFormula(TString &formula);
    Bool_t PrepareFormula(TString &formula);
+   void   ReplaceParamName(TString &formula, const TString & oldname, const TString & name);
    void   DoAddParameter(const TString &name, Double_t value, bool processFormula);
    void   DoSetParameters(const Double_t * p, Int_t size);
    void   SetPredefinedParamNames(); 
 
-   Double_t       DoEval(const Double_t * x  = nullptr, const Double_t * p = nullptr);
+   Double_t       DoEval(const Double_t * x, const Double_t * p = nullptr) const;
 
    enum {
       kNotGlobal     = BIT(10),  // don't store in gROOT->GetListOfFunction (it should be protected)
@@ -141,18 +148,20 @@ public:
    TFormula&      operator=(const TFormula &rhs);
    TFormula(const TString &name, TString formula, bool addToGlobList = true);
                   TFormula(const TFormula &formula);
-                  TFormula(const char *name, Int_t nparams, Int_t ndims);
+   //               TFormula(const char *name, Int_t nparams, Int_t ndims);
 
    void           AddParameter(const TString &name, Double_t value) { DoAddParameter(name,value,true); }
    void           AddVariable(const TString &name, Double_t value);
    void           AddVariables(const std::pair<TString,Double_t> *vars, const Int_t size);
-   void           Copy(TObject &f1) const;
-   Double_t       Eval(Double_t x);
-   Double_t       Eval(Double_t x, Double_t y);
-   Double_t       Eval(Double_t x, Double_t y , Double_t z);
-   Double_t       Eval(Double_t x, Double_t y , Double_t z , Double_t t );
-   Double_t       EvalPar(const Double_t *x, const Double_t *params=0);
-   TString        GetExpFormula() const { return fFormula; }
+   Int_t          Compile(const char *expression="");
+   virtual void   Copy(TObject &f1) const;
+   virtual void   Clear(Option_t * option="");
+   Double_t       Eval(Double_t x) const;
+   Double_t       Eval(Double_t x, Double_t y) const;
+   Double_t       Eval(Double_t x, Double_t y , Double_t z) const;
+   Double_t       Eval(Double_t x, Double_t y , Double_t z , Double_t t ) const;
+   Double_t       EvalPar(const Double_t *x, const Double_t *params=0) const;
+   TString        GetExpFormula(Option_t *option="") const;
    const TObject *GetLinearPart(Int_t i) const;
    Int_t          GetNdim() const {return fNdim;}
    Int_t          GetNpar() const {return fNpar;}
@@ -163,7 +172,9 @@ public:
    Double_t       GetParameter(Int_t param) const;
    Double_t*      GetParameters() const;
    void           GetParameters(Double_t *params) const;
-   Double_t       GetVariable(const TString &name);
+   Double_t       GetVariable(const char *name) const;
+   Int_t          GetVarNumber(const char *name) const;
+   TString        GetVarName(Int_t ivar) const;
    Bool_t         IsValid() const { return fReadyToExecute; }
    Bool_t         IsLinear() const { return TestBit(kLinear); }
    void           Print(Option_t *option = "") const;
@@ -183,6 +194,6 @@ public:
    void           SetVariable(const TString &name, Double_t value);
    void           SetVariables(const std::pair<TString,Double_t> *vars, const Int_t size);
 
-   ClassDef(TFormula,9)
+   ClassDef(TFormula,10)
 };
 #endif

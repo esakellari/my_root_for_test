@@ -89,14 +89,15 @@ function BuildSimpleGUI() {
    } else {
 
       var files = myDiv.attr("files");
-      var path = myDiv.attr("path");
+      var path = JSROOT.GetUrlOption("path");
+      if (path==null) path = myDiv.attr("path");
+      if (path==null) path = "";
 
       if (files==null) files = "../files/hsimple.root";
-      if (path==null) path = "";
       var arrFiles = files.split(';');
 
       guiCode += "<h1><font face='Verdana' size='4'>Read a ROOT file</font></h1>"
-              + "<p><font face='Verdana' size='1px'><a href='http://root.cern.ch/js/jsroot.html'>JSROOT</a> version <span style='color:green'><b>" + JSROOT.version + "</b></span></font></p>";
+              + "<p><font face='Verdana' size='1px'><a href='http://root.cern.ch/js/'>JSROOT</a> version <span style='color:green'><b>" + JSROOT.version + "</b></span></font></p>";
 
       if (JSROOT.GetUrlOption("noselect")==null) {
         guiCode += '<form name="ex">'

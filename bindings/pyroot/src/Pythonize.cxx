@@ -19,6 +19,7 @@
 // ROOT
 #include "TClass.h"
 #include "TFunction.h"
+#include "TInterpreter.h"
 #include "TMethod.h"
 
 #include "TClonesArray.h"
@@ -70,6 +71,15 @@ namespace {
 
       PyErr_Clear();
       return kFALSE;
+   }
+
+//____________________________________________________________________________
+   PyObject* PyObject_GetAttrFromDict( PyObject* pyclass, PyObject* pyname ) {
+   // prevents calls to descriptors
+      PyObject* dict = PyObject_GetAttr( pyclass, PyStrings::gDict );
+      PyObject* attr = PyObject_GetItem( dict, pyname );
+      Py_DECREF( dict );
+      return attr;
    }
 
 //____________________________________________________________________________
@@ -828,6 +838,109 @@ namespace {
    }
 
 //- vector behavior as primitives ----------------------------------------------
+   typedef struct {
+      PyObject_HEAD
+      PyObject*           vi_vector;
+      void*               vi_data;
+      PyROOT::TConverter* vi_converter;
+      Py_ssize_t          vi_pos;
+      Py_ssize_t          vi_len;
+      Py_ssize_t          vi_stride;
+   } vectoriterobject;
+
+   static void vectoriter_dealloc( vectoriterobject* vi ) {
+      Py_XDECREF( vi->vi_vector );
+      delete vi->vi_converter;
+      PyObject_GC_Del( vi );
+   }
+
+   static int vectoriter_traverse( vectoriterobject* vi, visitproc visit, void* arg ) {
+      Py_VISIT( vi->vi_vector );
+      return 0;
+   }
+
+   static PyObject* vectoriter_iternext( vectoriterobject* vi ) {
+      if ( vi->vi_pos >= vi->vi_len )
+         return nullptr;
+
+      PyObject* result = nullptr;
+
+      if ( vi->vi_data && vi->vi_converter ) {
+         void* location  = (void*)((ptrdiff_t)vi->vi_data + vi->vi_stride * vi->vi_pos );
+         result = vi->vi_converter->FromMemory( location );
+      } else {
+         PyObject* pyindex = PyLong_FromLong( vi->vi_pos );
+         result = CallPyObjMethod( (PyObject*)vi->vi_vector, "_vector__at", pyindex );
+         Py_DECREF( pyindex );
+      }
+
+      vi->vi_pos += 1;
+      return result;
+   }
+
+   PyTypeObject VectorIter_Type = {
+      PyVarObject_HEAD_INIT( &PyType_Type, 0 )
+      (char*)"ROOT.vectoriter",  // tp_name
+      sizeof(vectoriterobject),  // tp_basicsize
+      0,
+      (destructor)vectoriter_dealloc,            // tp_dealloc
+      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+      Py_TPFLAGS_DEFAULT |
+         Py_TPFLAGS_HAVE_GC,     // tp_flags
+      0,
+      (traverseproc)vectoriter_traverse,         // tp_traverse
+      0, 0, 0,
+      PyObject_SelfIter,         // tp_iter
+      (iternextfunc)vectoriter_iternext,         // tp_iternext
+      0,                         // tp_methods
+      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+#if PY_VERSION_HEX >= 0x02030000
+      , 0                        // tp_del
+#endif
+#if PY_VERSION_HEX >= 0x02060000
+      , 0                        // tp_version_tag
+#endif
+#if PY_VERSION_HEX >= 0x03040000
+      , 0                        // tp_finalize
+#endif
+   };
+
+   static PyObject* vector_iter( PyObject* v ) {
+      vectoriterobject* vi = PyObject_GC_New( vectoriterobject, &VectorIter_Type );
+      if ( ! vi ) return NULL;
+
+      Py_INCREF( v );
+      vi->vi_vector = v;
+
+      PyObject* pyvalue_type = PyObject_GetAttrString( (PyObject*)Py_TYPE(v), "value_type" );
+      PyObject* pyvalue_size = PyObject_GetAttrString( (PyObject*)Py_TYPE(v), "value_size" );
+
+      if ( pyvalue_type && pyvalue_size ) {
+         PyObject* pydata = CallPyObjMethod( v, "data" );
+         if ( Utility::GetBuffer( pydata, '*', 1, vi->vi_data, kFALSE ) == 0 )
+            vi->vi_data = nullptr;
+         Py_DECREF( pydata );
+
+         vi->vi_converter = PyROOT::CreateConverter( PyROOT_PyUnicode_AsString( pyvalue_type ) );
+         vi->vi_stride    = PyLong_AsLong( pyvalue_size );
+      } else {
+         PyErr_Clear();
+         vi->vi_data      = nullptr;
+         vi->vi_converter = nullptr;
+         vi->vi_stride    = 0;
+      }
+
+      Py_XDECREF( pyvalue_size );
+      Py_XDECREF( pyvalue_type );
+
+      vi->vi_len = vi->vi_pos = 0;
+      vi->vi_len = PySequence_Size( v );
+
+      _PyObject_GC_TRACK( vi );
+      return (PyObject*)vi;
+   }
+
+
    PyObject* VectorGetItem( ObjectProxy* self, PySliceObject* index )
    {
    // Implement python's __getitem__ for std::vector<>s.
@@ -1085,14 +1198,6 @@ static int PyObject_Compare( PyObject* one, PyObject* other ) {
 
 
 //- TIter behavior -------------------------------------------------------------
-   PyObject* TIterIter( PyObject* self )
-   {
-   // Implementation of python __iter__ (iterator protocol) for TIter.
-      Py_INCREF( self );
-      return self;
-   }
-
-//____________________________________________________________________________
    PyObject* TIterNext( PyObject* self )
    {
    // Implementation of python __next__ (iterator protocol) for TIter.
@@ -1157,7 +1262,7 @@ static int PyObject_Compare( PyObject* one, PyObject* other ) {
 //____________________________________________________________________________
    PyObject* StlIterIsNotEqual( PyObject* self, PyObject* other )
    {
-   // Called if operator== not available (e.g. if a global overload as under gcc).
+   // Called if operator!= not available (e.g. if a global overload as under gcc).
    // An exception is raised as the user should fix the dictionary.
       return PyErr_Format( PyExc_LookupError,
          "No operator!=(const %s&, const %s&) available in the dictionary!",
@@ -1237,8 +1342,8 @@ namespace PyROOT {      // workaround for Intel icc on Linux
    PyObject* TTreeGetAttr( ObjectProxy* self, PyObject* pyname )
    {
    // allow access to branches/leaves as if they are data members
-      const char* name = PyROOT_PyUnicode_AsString( pyname );
-      if ( ! name )
+      const char* name1 = PyROOT_PyUnicode_AsString( pyname );
+      if ( ! name1 )
          return 0;
 
    // get hold of actual tree
@@ -1249,6 +1354,10 @@ namespace PyROOT {      // workaround for Intel icc on Linux
          PyErr_SetString( PyExc_ReferenceError, "attempt to access a null-pointer" );
          return 0;
       }
+
+   // deal with possible aliasing
+      const char* name = tree->GetAlias( name1 );
+      if ( ! name ) name = name1;
 
    // search for branch first (typical for objects)
       TBranch* branch = tree->GetBranch( name );
@@ -1346,6 +1455,7 @@ namespace PyROOT {      // workaround for Intel icc on Linux
       // Assignment operator; conform to python reference counting.
          if ( &t != this ) {
             Py_INCREF( t.fOrg );
+            Py_XDECREF( fOrg );
             fOrg = t.fOrg;
          }
          return *this;
@@ -2237,7 +2347,21 @@ Bool_t PyROOT::Pythonize( PyObject* pyclass, const std::string& name )
             PyObject_DelAttr( pyclass, PyStrings::gIter );
       } else if ( HasAttrDirect( pyclass, PyStrings::gGetItem ) ) {
          Utility::AddToClass( pyclass, "_vector__at", "__getitem__" );   // unchecked!
-      // if unchecked getitem, use checked iterator protocol (was set above if begin/end)
+      }
+
+   // vector-optimized iterator protocol
+      ((PyTypeObject*)pyclass)->tp_iter     = (getiterfunc)vector_iter;
+
+   // helpers for iteration
+      TypedefInfo_t* ti = gInterpreter->TypedefInfo_Factory( (name+"::value_type").c_str() );
+      if ( gInterpreter->TypedefInfo_IsValid( ti ) ) {
+         PyObject* pyvalue_size = PyLong_FromLong( gInterpreter->TypedefInfo_Size( ti ) );
+         PyObject_SetAttrString( pyclass, "value_size", pyvalue_size );
+         Py_DECREF( pyvalue_size );
+
+         PyObject* pyvalue_type = PyROOT_PyUnicode_FromString( gInterpreter->TypedefInfo_TrueName( ti ) );
+         PyObject_SetAttrString( pyclass, "value_type", pyvalue_type );
+         Py_DECREF( pyvalue_type );
       }
 
    // provide a slice-able __getitem__, if possible
@@ -2314,8 +2438,8 @@ Bool_t PyROOT::Pythonize( PyObject* pyclass, const std::string& name )
    }
 
    if ( name == "TIter" ) {
-      ((PyTypeObject*)pyclass)->tp_iter     = (getiterfunc)TIterIter;
-      Utility::AddToClass( pyclass, "__iter__", (PyCFunction) TIterIter, METH_NOARGS );
+      ((PyTypeObject*)pyclass)->tp_iter     = (getiterfunc)PyObject_SelfIter;
+      Utility::AddToClass( pyclass, "__iter__", (PyCFunction) PyObject_SelfIter, METH_NOARGS );
 
       ((PyTypeObject*)pyclass)->tp_iternext = (iternextfunc)TIterNext;
       Utility::AddToClass( pyclass, "next", (PyCFunction) TIterNext, METH_NOARGS );
@@ -2338,7 +2462,8 @@ Bool_t PyROOT::Pythonize( PyObject* pyclass, const std::string& name )
       Utility::AddToClass( pyclass, "__getattr__", (PyCFunction) TTreeGetAttr, METH_O );
 
    // workaround for templated member Branch()
-      MethodProxy* original = (MethodProxy*)PyObject_GetAttr( pyclass, PyStrings::gBranch );
+      MethodProxy* original =
+         (MethodProxy*)PyObject_GetAttrFromDict( pyclass, PyStrings::gBranch );
       MethodProxy* method = MethodProxy_New( "Branch", new TTreeBranch( original ) );
       Py_DECREF( original ); original = 0;
 
@@ -2347,7 +2472,7 @@ Bool_t PyROOT::Pythonize( PyObject* pyclass, const std::string& name )
       Py_DECREF( method ); method = 0;
 
    // workaround for templated member SetBranchAddress()
-      original = (MethodProxy*)PyObject_GetAttr( pyclass, PyStrings::gSetBranchAddress );
+      original = (MethodProxy*)PyObject_GetAttrFromDict( pyclass, PyStrings::gSetBranchAddress );
       method = MethodProxy_New( "SetBranchAddress", new TTreeSetBranchAddress( original ) );
       Py_DECREF( original ); original = 0;
 
@@ -2360,7 +2485,8 @@ Bool_t PyROOT::Pythonize( PyObject* pyclass, const std::string& name )
 
    if ( name == "TChain" ) {
    // allow SetBranchAddress to take object directly, w/o needing AddressOf()
-      MethodProxy* original = (MethodProxy*)PyObject_GetAttr( pyclass, PyStrings::gSetBranchAddress );
+      MethodProxy* original =
+         (MethodProxy*)PyObject_GetAttrFromDict( pyclass, PyStrings::gSetBranchAddress );
       MethodProxy* method = MethodProxy_New( "SetBranchAddress", new TChainSetBranchAddress( original ) );
       Py_DECREF( original ); original = 0;
 

@@ -111,7 +111,7 @@ static inline Int_t ExtractChar( PyObject* pyobject, const char* tname, Int_t lo
       else
          PyErr_Format( PyExc_TypeError, "%s expected, got string of size " PY_SSIZE_T_FORMAT,
              tname, PyROOT_PyUnicode_GET_SIZE( pyobject ) );
-   } else {
+   } else if ( ! PyFloat_Check( pyobject ) ) {    // don't allow truncating conversion
       lchar = PyLong_AsLong( pyobject );
       if ( lchar == -1 && PyErr_Occurred() )
          ; // empty, as error already set
@@ -120,7 +120,9 @@ static inline Int_t ExtractChar( PyObject* pyobject, const char* tname, Int_t lo
             "integer to character: value %d not in range [%d,%d]", lchar, low, high );
          lchar = -1;
       }
-   }
+   } else
+      PyErr_SetString( PyExc_TypeError, "char or small int type expected" );
+
    return lchar;
 }
 
@@ -814,8 +816,10 @@ Bool_t PyROOT::TCppObjectConverter::SetArg(
 
    // calculate offset between formal and actual arguments
       para.fValue.fVoidp = pyobj->GetObject();
-      para.fValue.fLong += Cppyy::GetBaseOffset(
-         pyobj->ObjectIsA(), fClass, para.fValue.fVoidp, 1 /* up-cast */ );
+      if ( pyobj->ObjectIsA() != fClass ) {
+         para.fValue.fLong += Cppyy::GetBaseOffset(
+            pyobj->ObjectIsA(), fClass, para.fValue.fVoidp, 1 /* up-cast */ );
+      }
 
    // set pointer (may be null) and declare success
       para.fTypeCode = 'v';
@@ -1163,7 +1167,7 @@ PyROOT::TConverter* PyROOT::CreateConverter( const std::string& fullType, Long_t
       h = gConvFactories.find( "void*" );
    }
 
-   if ( ! result and cpd == "&&" )                 // moves
+   if ( ! result && cpd == "&&" )                  // moves
       result = new TNotImplementedConverter();
 
    if ( ! result && h != gConvFactories.end() )

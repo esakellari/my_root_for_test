@@ -73,7 +73,8 @@ namespace Cppyy {
    Bool_t      IsSubtype( TCppType_t derived, TCppType_t base );
 
 // calculate offsets between declared and actual type, up-cast: direction > 0; down-cast: direction < 0
-   ptrdiff_t GetBaseOffset( TCppType_t derived, TCppType_t base, TCppObject_t address, int direction );
+   ptrdiff_t GetBaseOffset(
+      TCppType_t derived, TCppType_t base, TCppObject_t address, int direction, bool rerror = false );
 
 // method/function reflection information ------------------------------------
    TCppIndex_t  GetNumMethods( TCppScope_t scope );
@@ -114,6 +115,7 @@ namespace Cppyy {
 // data member properties ----------------------------------------------------
    Bool_t IsPublicData( TCppScope_t scope, TCppIndex_t idata );
    Bool_t IsStaticData( TCppScope_t scope, TCppIndex_t idata );
+   Bool_t IsConstData( TCppScope_t scope, TCppIndex_t idata );
    Bool_t IsEnumData( TCppScope_t scope, TCppIndex_t idata );
    Int_t  GetDimensionSize( TCppScope_t scope, TCppIndex_t idata, int dimension );
 

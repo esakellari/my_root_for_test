@@ -426,7 +426,7 @@ void TBranchElement::Init(TTree *tree, TBranch *parent,const char* bname, TStrea
       if (splitlevel > 0) {
          // -- Create sub branches if requested by splitlevel.
          const char* elem_type = element->GetTypeName();
-         fSTLtype = TMath::Abs(TClassEdit::IsSTLCont(elem_type));
+         fSTLtype = TClassEdit::UnderlyingIsSTLCont(elem_type);
          if (element->CannotSplit()) {
             fSplitLevel = 0;
          } else if (element->IsA() == TStreamerBase::Class()) {
@@ -2142,7 +2142,7 @@ TVirtualCollectionProxy* TBranchElement::GetCollectionProxy()
          TStreamerElement* se = si->GetElement(fID);
          className = se->GetTypeName();
       }
-      TClass* cl = TClass::GetClass(className);
+      TClass* cl = className ? TClass::GetClass(className) : 0;
       if (!cl) {
          // The TClass was not created but we do know (since it
          // is used as a collection) that it 'className' was a
@@ -2155,6 +2155,7 @@ TVirtualCollectionProxy* TBranchElement::GetCollectionProxy()
          } else {
             cl = new TClass(className, fClassVersion);
             cl->SetBit(TClass::kIsEmulation);
+            className = cl->GetName();
          }
       }
       TVirtualCollectionProxy* proxy = cl->GetCollectionProxy();
@@ -2177,10 +2178,7 @@ TVirtualCollectionProxy* TBranchElement::GetCollectionProxy()
          cl->CopyCollectionProxy( *proxy );
       }
       fCollProxy = proxy->Generate();
-      fSTLtype = className ? TClassEdit::IsSTLCont(className) : 0;
-      if (fSTLtype < 0) {
-         fSTLtype = -fSTLtype;
-      }
+      fSTLtype = proxy->GetCollectionType();
    } else if (fType == 41) {
       // STL container sub-branch.
       thiscast->fCollProxy = fBranchCount->GetCollectionProxy();
@@ -2299,10 +2297,13 @@ Int_t TBranchElement::GetEntry(Long64_t entry, Int_t getall)
       }
       switch(fSTLtype) {
          case ROOT::kSTLset:
-         case ROOT::kSTLunorderedset:
          case ROOT::kSTLmultiset:
+         case ROOT::kSTLunorderedset:
+         case ROOT::kSTLunorderedmultiset:
          case ROOT::kSTLmap:
          case ROOT::kSTLmultimap:
+         case ROOT::kSTLunorderedmap:
+         case ROOT::kSTLunorderedmultimap:
             break;
          default:
             ValidateAddress(); // There is no ReadLeave for this node, so we need to do the validation here.
@@ -3776,9 +3777,12 @@ void TBranchElement::ReadLeavesCollection(TBuffer& b)
    switch (fSTLtype) {
       case ROOT::kSTLset:
       case ROOT::kSTLunorderedset:
+      case ROOT::kSTLunorderedmultiset:
       case ROOT::kSTLmultiset:
       case ROOT::kSTLmap:
       case ROOT::kSTLmultimap:
+      case ROOT::kSTLunorderedmap:
+      case ROOT::kSTLunorderedmultimap:
          for (Int_t i = 0; i < nbranches; ++i) {
             TBranch *branch = (TBranch*) fBranches[i];
             Int_t nb = branch->GetEntry(GetReadEntry(), 1);
@@ -4529,7 +4533,7 @@ void TBranchElement::SetAddress(void* addr)
             // Change from 3/31 to 4/41
             SetType(4);
             // Set the proxy.
-            fSTLtype = TMath::Abs(TClassEdit::IsSTLCont(newType->GetName()));
+            fSTLtype = newType->GetCollectionType();
             fCollProxy = newType->GetCollectionProxy()->Generate();
 
             SwitchContainer(GetListOfBranches());

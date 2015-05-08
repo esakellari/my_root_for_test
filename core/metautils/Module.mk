@@ -15,7 +15,8 @@ METAUTILSDIRI  := $(METAUTILSDIR)/inc
 ##### $(METAUTILSO) #####
 METAUTILSH     := $(filter-out $(MODDIRI)/TMetaUtils.%,\
   $(filter-out $(MODDIRI)/libcpp_string_view.h,\
-  $(filter-out $(MODDIRI)/LinkDef%,$(wildcard $(MODDIRI)/*.h))))
+  $(filter-out $(MODDIRI)/RWrap_libcpp_string_view.h,\
+  $(filter-out $(MODDIRI)/LinkDef%,$(wildcard $(MODDIRI)/*.h)))))
 METAUTILSS     := $(filter-out $(MODDIRS)/TMetaUtils.%,\
   $(filter-out $(MODDIRS)/G__%,$(wildcard $(MODDIRS)/*.cxx)))
 
@@ -23,7 +24,7 @@ METAUTILSTH     += $(MODDIRI)/TMetaUtils.h
 METAUTILSTS     += $(MODDIRS)/TMetaUtils.cxx
 METAUTILSTH     += $(MODDIRI)/root_std_complex.h
 METAUTILSTH     += $(MODDIRI)/libcpp_string_view.h
-
+METAUTILSTH     += $(MODDIRI)/RWrap_libcpp_string_view.h
 
 METAUTILSSLLVM := $(MODDIRS)/BaseSelectionRule.cxx \
                   $(MODDIRS)/ClassSelectionRule.cxx \
@@ -64,6 +65,9 @@ STLDICTS += lib/libmapDict.$(SOEXT)
 STLDICTS += lib/libmap2Dict.$(SOEXT)
 STLDICTS += lib/libsetDict.$(SOEXT)
 STLDICTS += lib/libunordered_setDict.$(SOEXT)
+STLDICTS += lib/libunordered_multisetDict.$(SOEXT)
+STLDICTS += lib/libunordered_mapDict.$(SOEXT)
+STLDICTS += lib/libunordered_multimapDict.$(SOEXT)
 STLDICTS += lib/libmultimapDict.$(SOEXT)
 STLDICTS += lib/libmultimap2Dict.$(SOEXT)
 STLDICTS += lib/libmultisetDict.$(SOEXT)

@@ -33,6 +33,18 @@ include(RootNewMacros)
 include(CheckCompiler)
 include(MacroEnsureVersion)
 
+#---Enable CCache ------------------------------------------------------------------------------
+if(ccache)
+   find_program(ccache_cmd NAMES ccache ccache-swig)
+   mark_as_advanced(ccache_cmd ${ccache_cmd})
+   if(ccache_cmd)
+      message(STATUS "Using ccache for building")
+      set_property(GLOBAL PROPERTY RULE_LAUNCH_COMPILE ccache)
+   else()
+      message(STATUS "Could NOT find ccache")
+   endif()
+endif()
+
 #---Enable CTest package -----------------------------------------------------------------------
 #include(CTest)
 if(testing)
@@ -93,6 +105,7 @@ add_custom_target(move_headers DEPENDS ${stamp_file}
                                                         -P ${CMAKE_SOURCE_DIR}/cmake/scripts/local_install.cmake)
 include_directories(${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_INCLUDEDIR})
 
+
 #---Recurse into the given subdirectories.  This does not actually cause another cmake executable
 #  to run. The same process will walk through the project's entire directory structure.
 add_subdirectory (interpreter)
@@ -133,12 +146,12 @@ get_property(__clingetcpch GLOBAL PROPERTY CLINGETCPCH)
 add_custom_command(OUTPUT etc/dictpch/allLinkDefs.h
                           etc/dictpch/allHeaders.h
                           etc/dictpch/allCppflags.txt
-                   COMMAND ${CMAKE_SOURCE_DIR}/build/unix/makepchinput.sh ${CMAKE_SOURCE_DIR} "." ${__clingetcpch}
-                   DEPENDS ${CMAKE_SOURCE_DIR}/build/unix/makepchinput.sh ${__allFiles})
+                   COMMAND ${CMAKE_SOURCE_DIR}/build/unix/makepchinput.py ${CMAKE_SOURCE_DIR} "." ${__clingetcpch}
+                   DEPENDS ${CMAKE_SOURCE_DIR}/build/unix/makepchinput.py ${__allFiles})
 
 add_custom_command(OUTPUT etc/allDict.cxx.pch
-                   COMMAND ${CMAKE_SOURCE_DIR}/etc/dictpch/makepch.sh etc/allDict.cxx.pch -I${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_INCLUDEDIR}
-                   DEPENDS ${CMAKE_SOURCE_DIR}/etc/dictpch/makepch.sh
+                   COMMAND ${CMAKE_SOURCE_DIR}/etc/dictpch/makepch.py etc/allDict.cxx.pch -I${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_INCLUDEDIR}
+                   DEPENDS ${CMAKE_SOURCE_DIR}/etc/dictpch/makepch.py
                            etc/dictpch/allLinkDefs.h
                            etc/dictpch/allHeaders.h
                            etc/dictpch/allCppflags.txt

@@ -671,7 +671,7 @@ void TStreamerInfo::BuildCheck(TFile *file /* = 0 */)
       }
 
   } else {
-      if (TClassEdit::IsSTLCont(fClass->GetName())) {
+     if (fClass->GetCollectionType() > ROOT::kNotSTL) {
          SetBit(kCanDelete);
          return;
       }
@@ -1051,7 +1051,7 @@ void TStreamerInfo::BuildCheck(TFile *file /* = 0 */)
                TIter nextBC(fClass->GetListOfBases());
                TBaseClass* bc = 0;
                while ((bc = (TBaseClass*) nextBC())) {
-                  if (TClassEdit::IsSTLCont(bc->GetName())) {
+                  if (bc->GetClassPointer()->GetCollectionType()) {
                      warn = kFALSE;
                   }
                }
@@ -1178,7 +1178,7 @@ Bool_t TStreamerInfo::BuildFor( const TClass *in_memory_cl )
 
    rules = in_memory_cl->GetSchemaRules()->FindRules( GetName(), fOnFileClassVersion, fCheckSum );
 
-   if( !rules && !TClassEdit::IsSTLCont( in_memory_cl->GetName() ) ) {
+   if( !rules && !in_memory_cl->GetCollectionType() ) {
       Warning( "BuildFor", "The build of %s streamer info for %s has been requested, but no matching conversion rules were specified", GetName(), in_memory_cl->GetName() );
       return kFALSE;
    }
@@ -1326,7 +1326,7 @@ namespace {
           && (oldProxy->GetType() == kFloat_t || oldProxy->GetType() == kFloat16_t)
           && (newProxy->GetType() == kFloat_t || newProxy->GetType() == kFloat16_t )) {
             // We have compatibles collections (they have the same content)!
-         return (TClassEdit::IsSTLCont(oldClass->GetName()) == TClassEdit::IsSTLCont(newClass->GetName()));
+         return (oldClass->GetCollectionType() == newClass->GetCollectionType());
       }
       return kFALSE;
    }
@@ -1343,7 +1343,7 @@ namespace {
           && (oldProxy->GetType() == kDouble_t || oldProxy->GetType() == kDouble32_t)
           && (newProxy->GetType() == kDouble_t || newProxy->GetType() == kDouble32_t )) {
             // We have compatibles collections (they have the same content)!
-         return (TClassEdit::IsSTLCont(oldClass->GetName()) == TClassEdit::IsSTLCont(newClass->GetName()));
+         return (oldClass->GetCollectionType() == newClass->GetCollectionType());
       }
       return kFALSE;
    }
@@ -1360,7 +1360,7 @@ namespace {
           && (oldProxy->GetType() == kLong_t || oldProxy->GetType() == kLong64_t)
           && (newProxy->GetType() == kLong_t || newProxy->GetType() == kLong64_t )) {
          // We have compatibles collections (they have the same content)!
-         return (TClassEdit::IsSTLCont(oldClass->GetName()) == TClassEdit::IsSTLCont(newClass->GetName()));
+         return (oldClass->GetCollectionType() == newClass->GetCollectionType());
       }
       return kFALSE;
    }
@@ -1377,7 +1377,7 @@ namespace {
           && (oldProxy->GetType() == kULong_t || oldProxy->GetType() == kULong64_t)
           && (newProxy->GetType() == kULong_t || newProxy->GetType() == kULong64_t )) {
          // We have compatibles collections (they have the same content)!
-         return (TClassEdit::IsSTLCont(oldClass->GetName()) == TClassEdit::IsSTLCont(newClass->GetName()));
+         return (oldClass->GetCollectionType() == newClass->GetCollectionType());
       }
       return kFALSE;
    }
@@ -1596,7 +1596,7 @@ void TStreamerInfo::BuildOld()
    Bool_t wasCompiled = IsCompiled();
 
    if (fClass->GetClassVersion() == fClassVersion) {
-      if (!fClass->HasInterpreterInfo() || TClassEdit::IsSTLCont(GetName(), 0) || TClassEdit::IsSTLBitset(GetName()))
+      if (!fClass->HasInterpreterInfo() || fClass->GetCollectionType() || TClassEdit::IsSTLBitset(GetName()))
       {
          // Handle emulated classes and STL containers specially.
          // in this case BuildRealData would call BuildOld for this same
@@ -1807,9 +1807,7 @@ void TStreamerInfo::BuildOld()
 
             {
                if (baseOffset < 0) {
-                  // FIXME: Presumably we're in emulated mode, but it still does not make any sense
-                  // shouldn't it be element->SetNewType(-1) ?
-                  baseOffset = 0;
+                  element->SetNewType(-1);
                }
             }
             element->SetOffset(baseOffset);
@@ -2089,8 +2087,8 @@ void TStreamerInfo::BuildOld()
                }
             }
             if (CollectionMatch(oldClass, newClass)) {
-               Int_t oldkind = TMath::Abs(TClassEdit::IsSTLCont( oldClass->GetName() ));
-               Int_t newkind = TMath::Abs(TClassEdit::IsSTLCont( newClass->GetName() ));
+               Int_t oldkind = oldClass->GetCollectionType();
+               Int_t newkind = newClass->GetCollectionType();
 
                if ( (oldkind==ROOT::kSTLmap || oldkind==ROOT::kSTLmultimap) &&
                     (newkind!=ROOT::kSTLmap && newkind!=ROOT::kSTLmultimap) ) {
@@ -3263,10 +3261,16 @@ static void R__WriteMoveConstructorBody(FILE *file, const TString &protoname, TI
             if (!defMod) {
                fprintf(file,"   %s &modrhs = const_cast<%s &>( rhs );\n",protoname.Data(),protoname.Data()); defMod = kTRUE;
             }
+            TClass *cle = element->GetClassPointer();
+            TVirtualCollectionProxy *proxy = cle ? element->GetClassPointer()->GetCollectionProxy() : 0;
+            std::string method_name = "clear";
+            if (!element->TestBit(TStreamerElement::kDoNotDelete) && proxy && (((TStreamerSTL*)element)->GetSTLtype() == ROOT::kSTLbitset)) {
+                method_name = "reset";
+            }
             if (element->IsBase()) {
-               fprintf(file,"   modrhs.clear();\n");
+               fprintf(file,"   modrhs.%s();\n", method_name.c_str());
             } else {
-               fprintf(file,"   modrhs.%s.clear();\n",ename);
+               fprintf(file,"   modrhs.%s.%s();\n",ename, method_name.c_str());
             }
          }
       }
@@ -3518,8 +3522,9 @@ void TStreamerInfo::GenerateDeclaration(FILE *fp, FILE *sfp, const TList *subCla
                case ROOT::kSTLmap:
                case ROOT::kSTLmultimap:
                case ROOT::kSTLset:
-               case ROOT::kSTLunorderedset:
                case ROOT::kSTLmultiset:
+               case ROOT::kSTLunorderedset:
+               case ROOT::kSTLunorderedmultiset:
                {
                   enamebasic = TMakeProject::UpdateAssociativeToVector(enamebasic);
                }
@@ -3687,7 +3692,7 @@ Int_t TStreamerInfo::GenerateHeaderFile(const char *dirname, const TList *subCla
    // the function is called by TFile::MakeProject for each class in the file
 
    // if (fClassVersion == -4) return 0;
-   if (TClassEdit::IsSTLCont(GetName())) return 0;
+   if ((fClass && fClass->GetCollectionType()) || TClassEdit::IsSTLCont(GetName())) return 0;
    if (strncmp(GetName(),"pair<",strlen("pair<"))==0) return 0;
    if (strncmp(GetName(),"auto_ptr<",strlen("auto_ptr<"))==0) return 0;
 
@@ -4949,6 +4954,42 @@ void TStreamerInfo::Streamer(TBuffer &R__b)
          ResetBit(kIsCompiled);
          ResetBit(kBuildOldUsed);
          ResetBit(kBuildRunning);
+
+         if (R__b.GetParent() && R__b.GetVersionOwner() < 50000)
+         {
+            // In some older files, the type of the TStreamerElement was not
+            // as we (now) expect.
+            Int_t nobjects = fElements->GetEntriesFast();
+            TClass *basic = TStreamerBasicType::Class();
+            for (Int_t i = 0; i < nobjects; i++) {
+               TStreamerElement *el = (TStreamerElement*)fElements->UncheckedAt(i);
+               TStreamerElement *rel = 0;
+               if ( el->IsA() == basic ) {
+                  switch (el->GetType()) {
+                     default: break; /* nothing */
+                     case TStreamerInfo::kObject: /*61*/
+                        rel = new TStreamerObject(el->GetName(),el->GetTitle(),el->GetOffset(),el->GetTypeName());
+                        break;
+                     case TStreamerInfo::kAny: /*62*/
+                        rel = new TStreamerObjectAny(el->GetName(),el->GetTitle(),el->GetOffset(),el->GetTypeName());
+                        break;
+                     case TStreamerInfo::kObjectp: /* 63 */
+                        rel = new TStreamerObjectPointer(el->GetName(),el->GetTitle(),el->GetOffset(),el->GetTypeName());
+                        break;
+                     case TStreamerInfo::kObjectP: /* 64 */
+                        rel = new TStreamerObjectPointer(el->GetName(),el->GetTitle(),el->GetOffset(),el->GetTypeName());
+                        break;
+                     case TStreamerInfo::kTString: /* 65 */
+                        rel = new TStreamerObject(el->GetName(),el->GetTitle(),el->GetOffset(),el->GetTypeName());
+                        break;
+                  }
+                  if (rel) {
+                     (*fElements)[i] = rel;
+                     delete el;
+                  }
+               }
+            }
+         }
          return;
       }
       //====process old versions before automatic schema evolution

@@ -13,7 +13,7 @@
 #include <v5/TFormula.h>
 #include <TRandom.h>
 #include <iostream>
-#include "TFormulaParceTests.h"
+#include "TFormulaParsingTests.h"
 
 using namespace std;
 
@@ -368,13 +368,13 @@ Bool_t TFormulaTests::Stress(Int_t n)
    for(Int_t i = 0; i < n ; ++i)
    {
       vars[i] = SDpair(TString::Format("x%d",i),i+1);
-      params[i] = SDpair(TString::Format("%d",i),i+1);
+      params[i] = SDpair(TString::Format("p%d",i),i+1);
       formula.Append(TString::Format("+ %s + %s*gausn(0) - [%d]",vars[i].first.Data(),vars[i].first.Data(),i));
       //cout << formula.Data() << endl;
    }
    for(Int_t i = n; i < n*5; ++i)
    {
-      params[i] = SDpair(TString::Format("%d",i),i+1);
+      params[i] = SDpair(TString::Format("p%d",i),i+1);
       formula.Append(TString::Format("*[%d]",i));
       //cout << formula.Data() << endl;
    }
@@ -390,7 +390,7 @@ Bool_t TFormulaTests::Stress(Int_t n)
       // vars[i] = SDpair(TString::Format("x",i),i+1);
       for (int j = 0; j < 5; ++j) {
          double val = 2.0;
-         params[i+j] = SDpair(TString::Format("%d",i+j),val);
+         params[i+j] = SDpair(TString::Format("p%d",i+j),val);
          //cout << "set parameter " << i+j << " value " << j+1 << endl;
          parv.push_back(val);
       }
@@ -403,7 +403,7 @@ Bool_t TFormulaTests::Stress(Int_t n)
    for(Int_t i = i0; i < n*5; ++i)
    {
       double val = i;
-      params[i] = SDpair(TString::Format("%d",i),val);
+      params[i] = SDpair(TString::Format("p%d",i),val);
       //cout << "set parameter " << i << " value " << i+1 << endl;
       parv.push_back(val);
       formula.Append(TString::Format("+[%d]",i));
@@ -487,10 +487,10 @@ Bool_t TFormulaTests::Stress(Int_t n)
 
 bool TFormulaTests::Parser() {
    std::cout << "Test parsing of expression compatible with old TFormula" << std::endl;
-   TFormulaParceTests t;
+   TFormulaParsingTests t;
    int nfailed = t.runTests();
    if (nfailed != 0) {
-      std::cout << "ERROR - Parcing test of TFormula failed - number of failures is " << nfailed << std::endl;
+      std::cout << "ERROR - Parsing test of TFormula failed - number of failures is " << nfailed << std::endl;
       return false;
    }
    return true; 

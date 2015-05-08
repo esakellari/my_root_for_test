@@ -3,6 +3,10 @@
 
 ### TTree Behavior change.
 
+#### Merging.
+
+Added fast cloning support to TTree::MergeTrees and TTree::Merge(TCollection*,Option_t*).
+
 #### TTreeCache
 
 The TTreeCache is now enabled by default.  The default size of the TTreeCache
@@ -36,3 +40,8 @@ setting TTreeCache.Size (or ROOT_TTREECACHE_SIZE) and TTreeCache.Prefill
 ### TSelectorDraw
 
 The axis titles in case of a `x:y:z` plot with the option `COLZ` were not correct.
+
+### TParallelCoordVar
+
+Change the format used to print the variables limit for ||-Coord to `%g`. It was
+`%6.4f` before.

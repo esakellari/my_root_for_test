@@ -82,13 +82,13 @@ if(NOT builtin_lzma)
   endif()
 endif()
 if(builtin_lzma)
-  set(lzma_version 5.0.3)
+  set(lzma_version 5.2.1)
   message(STATUS "Building LZMA version ${lzma_version} included in ROOT itself")
   if(WIN32)
     ExternalProject_Add(
      LZMA
      URL ${CMAKE_SOURCE_DIR}/core/lzma/src/xz-${lzma_version}-win32.tar.gz
-     URL_MD5  65693dc257802b6778c28ed53ecca678
+#      URL_MD5  65693dc257802b6778c28ed53ecca678
      PREFIX LZMA
      INSTALL_DIR ${CMAKE_BINARY_DIR}
       CONFIGURE_COMMAND "" BUILD_COMMAND ""
@@ -106,7 +106,7 @@ if(builtin_lzma)
     ExternalProject_Add(
       LZMA
       URL ${CMAKE_SOURCE_DIR}/core/lzma/src/xz-${lzma_version}.tar.gz
-      URL_MD5 858405e79590e9b05634c399497f4ba7
+      URL_MD5 3e44c766c3fb4f19e348e646fcd5778a
       INSTALL_DIR ${CMAKE_BINARY_DIR}
       CONFIGURE_COMMAND <SOURCE_DIR>/configure --prefix <INSTALL_DIR> --with-pic --disable-shared CFLAGS=${LZMA_CFLAGS}
       BUILD_IN_SOURCE 1)
@@ -760,6 +760,22 @@ if(chirp)
   endif()
 endif()
 
+#---Check for R/Rcpp/RInside--------------------------------------------------------------------
+#added search of R packages here to remove multiples searches
+if(r)
+FIND_PACKAGE(R REQUIRED)
+FIND_PACKAGE(Rcpp REQUIRED)
+FIND_PACKAGE(RInside REQUIRED)
+    if(${R_FOUND} AND ${RCPP_FOUND} AND ${RINSIDE_FOUND})
+        STRING(REGEX REPLACE "-I" "" RCPP_INCLUDE_DIR ${RCPP_INCLUDE_DIR})
+        STRING(REGEX REPLACE "-I" "" RINSIDE_INCLUDE_DIR  ${RINSIDE_INCLUDE_DIR})
+        STRING(REGEX REPLACE "-I" "" R_INCLUDE_DIR  ${R_INCLUDE_DIR})
+    else()
+        set(r OFF CACHE BOOL "" FORCE)
+    endif()
+endif()
+
+
 #---Check for hdfs--------------------------------------------------------------------
 if(hdfs)
   find_package(hdfs)
@@ -869,6 +885,34 @@ if (jemalloc)
   find_package(jemalloc)
   if(NOT JEMALLOC_FOUND)
     message(STATUS "JEMalloc not found.")
+  endif()
+endif()
+
+#---Check for TBB---------------------------------------------------------------------
+if(tbb)
+  if(builtin_tbb)
+    set(tbb_version 42_20140122)
+    ExternalProject_Add(
+      TBB
+      URL http://service-spi.web.cern.ch/service-spi/external/tarFiles/tbb${tbb_version}oss_src.tgz
+      INSTALL_DIR ${CMAKE_BINARY_DIR}
+      CONFIGURE_COMMAND ""
+      BUILD_COMMAND make CPLUS=${CMAKE_CXX_COMPILER} CONLY=${CMAKE_C_COMPILER}
+      INSTALL_COMMAND ${CMAKE_COMMAND} -Dinstall_dir=<INSTALL_DIR> -Dsource_dir=<SOURCE_DIR>
+                                       -P ${CMAKE_SOURCE_DIR}/cmake/scripts/InstallTBB.cmake
+      INSTALL_COMMAND ""
+      BUILD_IN_SOURCE 1
+    )
+    set(TBB_INCLUDE_DIRS ${CMAKE_BINARY_DIR}/include)
+    set(TBB_LIBRARIES ${CMAKE_BINARY_DIR}/lib/libtbb${CMAKE_SHARED_LIBRARY_SUFFIX})
+  else()
+    message(STATUS "Looking for TBB")
+    find_package(TBB)
+    if(NOT TBB_FOUND)
+      message(STATUS "TBB not found. You can enable the option 'builtin_tbb' to build the library internally'")
+      message(STATUS "               For the time being switching off 'tbb' option")
+      set(tbb OFF CACHE BOOL "" FORCE)
+    endif()
   endif()
 endif()
 

@@ -266,7 +266,7 @@ static CallFunc_t* GetCallFunc( Cppyy::TCppMethod_t method )
    
       TMethodArg* method_arg = 0;
       while ((method_arg = (TMethodArg*)iarg.Next())) {
-         std::string fullType = method_arg->GetFullTypeName();
+         std::string fullType = method_arg->GetTypeNormalizedName();
          if ( callString.empty() )
             callString = fullType;
          else
@@ -558,8 +558,8 @@ Bool_t Cppyy::IsSubtype( TCppType_t derived, TCppType_t base )
 }
 
 // type offsets --------------------------------------------------------------
-ptrdiff_t Cppyy::GetBaseOffset(
-      TCppType_t derived, TCppType_t base, TCppObject_t address, int direction )
+ptrdiff_t Cppyy::GetBaseOffset( TCppType_t derived, TCppType_t base,
+      TCppObject_t address, int direction, bool rerror )
 {
 // calculate offsets between declared and actual type, up-cast: direction > 0; down-cast: direction < 0
    if ( derived == base || !(base && derived) )
@@ -571,15 +571,19 @@ ptrdiff_t Cppyy::GetBaseOffset(
    if ( !cd.GetClass() || !cb.GetClass() )
       return (ptrdiff_t)0;
 
-   Long_t offset = gInterpreter->ClassInfo_GetBaseOffset(
-      cd->GetClassInfo(), cb->GetClassInfo(), (void*)address, direction > 0 );
-   if ( offset == -1 ) {
-   // warn to allow diagnostics, but 0 offset is often good, so use that and continue
+   Long_t offset = -1;
+   if ( ! (cd->GetClassInfo() && cb->GetClassInfo()) ) {
+   // warn to allow diagnostics, return -1 to signal caller NOT to apply offset
       std::ostringstream msg;
       msg << "failed offset calculation between " << cb->GetName() << " and " << cd->GetName();
       PyErr_Warn( PyExc_RuntimeWarning, const_cast<char*>( msg.str().c_str() ) );
-      return 0;
+      return rerror ? (ptrdiff_t)offset : 0;
    }
+
+   offset = gInterpreter->ClassInfo_GetBaseOffset(
+      cd->GetClassInfo(), cb->GetClassInfo(), (void*)address, direction > 0 );
+   if ( offset == -1 )  // Cling error, treat silently
+      return rerror ? (ptrdiff_t)offset : 0;
 
    return (ptrdiff_t)(direction < 0 ? -offset : offset);
 }
@@ -589,9 +593,23 @@ ptrdiff_t Cppyy::GetBaseOffset(
 Cppyy::TCppIndex_t Cppyy::GetNumMethods( TCppScope_t scope )
 {
    TClassRef& cr = type_from_handle( scope );
-   if ( cr.GetClass() && cr->GetListOfMethods() )
-      return (TCppIndex_t)cr->GetListOfMethods()->GetSize();
-   else if ( scope == (TCppScope_t)GLOBAL_HANDLE ) {
+   if ( cr.GetClass() && cr->GetListOfMethods() ) {
+      Cppyy::TCppIndex_t nMethods = (TCppIndex_t)cr->GetListOfMethods()->GetSize();
+      if ( nMethods == (TCppIndex_t)0 ) {
+         std::string clName = GetScopedFinalName( scope );
+         if ( clName.find( '<' ) != std::string::npos ) {
+         // chicken-and-egg problem: TClass does not know about methods until instantiation: force it
+            if ( TClass::GetClass( ("std::" + clName).c_str() ) )
+               clName = "std::" + clName;
+            std::ostringstream stmt;
+            stmt << "template class " << clName << ";";
+            gInterpreter->Declare( stmt.str().c_str() );
+         // now reload the methods
+            return (TCppIndex_t)cr->GetListOfMethods( kTRUE )->GetSize();
+         }
+      }
+      return nMethods;
+   } else if ( scope == (TCppScope_t)GLOBAL_HANDLE ) {
    // enforce lazines by denying the existence of methods
       return (TCppIndex_t)0;
    }
@@ -656,7 +674,7 @@ std::string Cppyy::GetMethodResultType( TCppMethod_t method )
       TFunction* f = (TFunction*)method;
       if ( f->ExtraProperty() & kIsConstructor )
          return "constructor";
-      return f->GetReturnTypeName();
+      return f->GetReturnTypeNormalizedName();
    }
    return "<unknown>";
 }
@@ -856,8 +874,6 @@ ptrdiff_t Cppyy::GetDatamemberOffset( TCppScope_t scope, TCppIndex_t idata )
 {
    if ( scope == GLOBAL_HANDLE ) {
       TGlobal* gbl = g_globalvars[ idata ];
-      if ( gbl->Property() & kIsEnum )
-         return (ptrdiff_t)*(void**)gbl->GetAddress();
       return (ptrdiff_t)gbl->GetAddress();
    }
 
@@ -924,6 +940,20 @@ Bool_t Cppyy::IsStaticData( TCppScope_t scope, TCppIndex_t idata  )
       return kTRUE;
    TDataMember* m = (TDataMember*)cr->GetListOfDataMembers()->At( idata );
    return m->Property() & kIsStatic;
+}
+
+Bool_t Cppyy::IsConstData( TCppScope_t scope, TCppIndex_t idata )
+{
+   if ( scope == GLOBAL_HANDLE ) {
+      TGlobal* gbl = g_globalvars[ idata ];
+      return gbl->Property() & kIsConstant;
+   }
+   TClassRef& cr = type_from_handle( scope );
+   if ( cr.GetClass() ) {
+      TDataMember* m = (TDataMember*)cr->GetListOfDataMembers()->At( idata );
+      return m->Property() & kIsConstant;
+   }
+   return kFALSE;
 }
 
 Bool_t Cppyy::IsEnumData( TCppScope_t scope, TCppIndex_t idata )

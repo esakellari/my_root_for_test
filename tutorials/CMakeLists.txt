@@ -73,6 +73,11 @@ if(NOT ROOT_xml_FOUND)
                 histfactory/*.C)   # histfactory requires xml
 endif()
 
+# variables identifying the package must have the package name  in lower case (it corresponds to the CMake option name)
+if(NOT ROOT_r_FOUND)
+  set(r_veto  r/*.C)
+endif()
+
 if(WIN32)
   set(histfactory_veto histfactory/*.C
                        roostats/StandardFrequentistDiscovery.C) # histfactory doesn't work on Windows
@@ -125,6 +130,9 @@ set(gui_veto fit/fitpanel_playback.C
              tree/tvdemo.C
              eve/*.C)
 
+#---These do not need to run for TMVA
+set (tmva_veto tmva/createData.C)
+
 #---These ones are disabled !!! ------------------------------------
 set(extra_veto
   htmlex.C
@@ -160,10 +168,12 @@ set(all_veto hsimple.C
              ${unuran_veto}
              ${xml_veto}
              ${fitsio_veto}
+	     ${tmva_veto}
              ${mathmore_veto}
              ${fftw3_veto}
              ${opengl_veto}
              ${gviz_veto}
+             ${r_veto}
              ${histfactory_veto})
 
 file(GLOB_RECURSE tutorials RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} *.C)
@@ -229,6 +239,16 @@ foreach(tname  ModelInspector OneSidedFrequentistUpperLimitWithBands StandardBay
   set(roostats-${tname}-depends tutorial-roostats-StandardProfileLikelihoodDemo)
 endforeach()
 
+#--dependency for TMVA tutorials
+set (tmva-TMVAClassificationApplication-depends tutorial-tmva-TMVAClassification)
+set (tmva-TMVAClassificationCategory-depends tutorial-tmva-TMVAClassification)
+set (tmva-TMVAClassificationCategoryApplication-depends tutorial-tmva-TMVAClassificationCategory)
+set (tmva-TMVAMulticlass-depends tutorial-tmva-TMVAMultipleBackgroundExample)
+set (tmva-TMVAMulticlassApplication-depends tutorial-tmva-TMVAMulticlass)
+set (tmva-TMVAMulticlassApplication-depends tutorial-tmva-TMVAMulticlass)
+set (tmva-TMVARegressionApplication-depends tutorial-tmva-TMVARegression)
+
+
 #---Loop over all tutorials and define the corresponding test---------
 
 #---Define the primordial tutorials-----------------------------------
@@ -249,7 +269,7 @@ foreach(t ${tutorials})
   string(REPLACE "/" "-" tname ${tname})
   ROOT_ADD_TEST(tutorial-${tname}
                 COMMAND ${ROOT_root_CMD} -b -l -q ${CMAKE_CURRENT_SOURCE_DIR}/${t}${${tname}-aclic}
-                PASSRC ${rc} FAILREGEX "Error in" "error:" "segmentation violation"
+                PASSRC ${rc} FAILREGEX "Error in" "error:" "segmentation violation" "FROM HESSE     STATUS=FAILED"
                 LABELS tutorial
                 DEPENDS tutorial-hsimple ${${tname}-depends}
                 ENVIRONMENT ${ROOT_environ})

@@ -285,11 +285,11 @@ static int BuildScopeProxyDict( Cppyy::TCppScope_t scope, PyObject* pyclass ) {
       }
 
    // decide on method type: member or static (which includes globals)
-      Bool_t isStatic = isNamespace || Cppyy::IsStaticMethod( method );
+      Bool_t isStatic = Cppyy::IsStaticMethod( method );
 
    // template members; handled by adding a dispatcher to the class
       std::string tmplName = "";
-      if ( ! (isStatic || isConstructor) && mtName[mtName.size()-1] == '>' ) {
+      if ( ! (isNamespace || isStatic || isConstructor) && mtName[mtName.size()-1] == '>' ) {
          tmplName = mtName.substr( 0, mtName.find('<') );
       // TODO: the following is incorrect if both base and derived have the same
       // templated method (but that is an unlikely scenario anyway)
@@ -322,8 +322,10 @@ static int BuildScopeProxyDict( Cppyy::TCppScope_t scope, PyObject* pyclass ) {
 
    // construct the holder
       PyCallable* pycall = 0;
-      if ( isStatic == kTRUE )               // class method
+      if ( isStatic )                        // class method
          pycall = new TClassMethodHolder( scope, method );
+      else if ( isNamespace )                // free function
+         pycall = new TFunctionHolder( scope, method );
       else if ( isConstructor ) {            // constructor
          pycall = new TConstructorHolder( scope, method );
          mtName = "__init__";
@@ -471,6 +473,21 @@ static PyObject* BuildCppClassBases( Cppyy::TCppType_t klass )
 
          PyTuple_SET_ITEM( pybases, ibase, pyclass );
       }
+
+   // special case, if true python types enter the hierarchy, make sure that
+   // the first base seen is still the ObjectProxy_Type
+      if ( ! PyObject_IsSubclass( PyTuple_GET_ITEM( pybases, 0 ), (PyObject*)&ObjectProxy_Type ) ) {
+         PyObject* newpybases = PyTuple_New( nbases + 1 );
+         Py_INCREF( (PyObject*)(void*)&ObjectProxy_Type );
+         PyTuple_SET_ITEM( newpybases, 0, (PyObject*)(void*)&ObjectProxy_Type );
+         for ( int ibase = 0; ibase < (int)nbases; ++ibase ) {
+             PyObject* pyclass = PyTuple_GET_ITEM( pybases, ibase );
+             Py_INCREF( pyclass );
+             PyTuple_SET_ITEM( newpybases, ibase + 1, pyclass );
+         }
+         Py_DECREF( pybases );
+         pybases = newpybases;
+      }
    }
 
    return pybases;
@@ -543,7 +560,7 @@ PyObject* PyROOT::CreateScopeProxy( const std::string& scope_name, PyObject* par
    std::string scName = "";
    if ( parent ) {
       PyObject* pyparent = PyObject_GetAttr( parent, PyStrings::gName );
-      if ( ! parent ) {
+      if ( ! pyparent ) {
          PyErr_Format( PyExc_SystemError, "given scope has no name for %s", name.c_str() );
          return 0;
       }
@@ -561,10 +578,7 @@ PyObject* PyROOT::CreateScopeProxy( const std::string& scope_name, PyObject* par
 // retrieve ROOT class (this verifies name, and is therefore done first)
    const std::string& lookup = parent ? (scName+"::"+name) : name;
    Cppyy::TCppScope_t klass = Cppyy::GetScope( lookup );
-   PyObject* pyscope = GetScopeProxy( klass );
-   if ( pyscope )
-      return pyscope;
-   
+
    if ( ! (Bool_t)klass || Cppyy::GetNumMethods( klass ) == 0 ) {
    // special action for STL classes to enforce loading dict lib
    // TODO: LoadDictionaryForSTLType should not be necessary with Cling
@@ -606,21 +620,16 @@ PyObject* PyROOT::CreateScopeProxy( const std::string& scope_name, PyObject* par
       return 0;
    }
 
-// locate class by TClass*, if possible, to prevent parsing scopes/templates anew
-   PyClassMap_t::iterator pci = gPyClasses.find( klass );
-   if ( pci != gPyClasses.end() ) {
-      PyObject* pyclass = PyWeakref_GetObject( pci->second );
-      if ( pyclass ) {
-         Py_INCREF( pyclass );
-         return pyclass;
-      }
-   }
+// locate class by ID, if possible, to prevent parsing scopes/templates anew
+   PyObject* pyscope = GetScopeProxy( klass );
+   if ( pyscope )
+      return pyscope;
 
 // locate the parent, if necessary, for building the class if not specified
+   std::string::size_type last = 0;
    if ( ! parent ) {
    // need to deal with template paremeters that can have scopes themselves
       Int_t tpl_open = 0;
-      std::string::size_type last = 0;
       for ( std::string::size_type pos = 0; pos < name.size(); ++pos ) {
          std::string::value_type c = name[ pos ];
 
@@ -655,6 +664,15 @@ PyObject* PyROOT::CreateScopeProxy( const std::string& scope_name, PyObject* par
             last = pos+2; ++pos;
          }
 
+      }
+
+      if ( parent ) {   // possibly freshly created above
+         std::string unscoped = scope_name.substr( last, std::string::npos );
+         PyObject* pyklass = PyObject_GetAttrString( parent, unscoped.c_str() );
+         if ( pyklass )
+            return pyklass;
+         PyErr_Clear();
+         return CreateScopeProxy( unscoped.c_str(), parent );
       }
    }
 
@@ -846,9 +864,12 @@ PyObject* PyROOT::BindCppObject( Cppyy::TCppObject_t address, Cppyy::TCppType_t 
 
 // downcast to real class for object returns
    if ( clActual && klass != clActual ) {
-      address = (void*)((Long_t)address + \
-         Cppyy::GetBaseOffset( clActual, klass, address, -1 /* down-cast */ ) );
-      klass = clActual;
+      ptrdiff_t offset = Cppyy::GetBaseOffset(
+         clActual, klass, address, -1 /* down-cast */, true /* report errors */ );
+      if ( offset != -1 ) {   // may fail if clActual not fully defined
+         address = (void*)((Long_t)address + offset);
+         klass = clActual;
+      }
    }
 
 // actual binding

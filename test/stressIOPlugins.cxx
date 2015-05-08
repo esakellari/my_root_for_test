@@ -12,20 +12,24 @@
 //   tested via tests based on some of stress.cxx tests.
 //
 //   Can be run as:
-//     stressIOPlugins
 //     stressIOPlugins [name]
 //
 //   The name parameter is a protocol name, as expected
-//   in a url. The supported names are: xroot, root, http, https
-//   If the name is omitted a selection of schemes are
+//   in a url. The supported names are: xroot, root, http, https,
+//   rfio. If the name is omitted a selection of schemes are
 //   tested based on feature availability:
 //
-//           feature          protocol
+//           feature          protocol    multithreaded test available
 //
-//            xrootd           root
-//            davix            http
+//            xrootd           root                no
+//            davix            http                no
+//            rfio(*)          rfio                no
 //
-// An example of output when all the tests run OK is shown below:
+// (*) Also requires a cern.ch kerberos token for sftnight to run the test,
+//     and rfio is not selected unless explicitly given as [name]
+//
+// An example of output of a non multithreaded test, when all the tests
+// run OK is shown below:
 //
 // ****************************************************************************
 // *  Starting stressIOPlugins test for protocol http
@@ -43,6 +47,14 @@
 //         : Trees split and compression modes..................... using Event_8b.root
 //         : opened file with plugin class......................... TDavixFile
 //         : Trees split and compression modes..................... OK
+// Test  4 : Filename formats when adding files to TChain.......... using Event_8a.root and Event_8b.root
+//         : treename in chain..................................... OK
+//         : treename to AddFile................................... OK
+//         : treename in filenames, slash-suffix style............. OK
+//         : bad treename to AddFile, good in filename............. OK
+//         : treename and url query in filename.................... OK
+//         : treename given in url frag in filename................ OK
+//         : filename with a url query in Add...................... OK
 // ****************************************************************************
 //_____________________________batch only_____________________
 #ifndef __CINT__
@@ -59,6 +71,7 @@
 #include <TCanvas.h>
 #include <TPostScript.h>
 #include <TTree.h>
+#include <TChain.h>
 #include <TTreeCache.h>
 #include <TSystem.h>
 #include <TApplication.h>
@@ -69,10 +82,11 @@
 R__LOAD_LIBRARY( libEvent )
 
 void stressIOPlugins();
-void stressIOPluginsForProto(const char *protoName = 0);
+void stressIOPluginsForProto(const char *protoName = 0, int multithread = 0);
 void stressIOPlugins1();
 void stressIOPlugins2();
 void stressIOPlugins3();
+void stressIOPlugins4();
 void cleanup();
 
 int main(int argc, char **argv)
@@ -93,7 +107,7 @@ class TTree;
 //_______________________ common part_________________________
 
 Double_t ntotin=0, ntotout=0;
-TString gPfx;
+TString gPfx,gCurProtoName;
 
 void Bprint(Int_t id, const char *title)
 {
@@ -140,6 +154,7 @@ int setPath(const char *proto)
 {
    if (!proto) return -1;
    TString p(proto);
+   gCurProtoName = p;
    if (p == "root" || p == "xroot") {
       gPfx = p + "://eospublic.cern.ch//eos/opstest/dhsmith/StressIOPluginsTestFiles/";
       return 0;
@@ -148,10 +163,28 @@ int setPath(const char *proto)
       gPfx = p + "://root.cern.ch/files/StressIOPluginsTestFiles/";
       return 0;
    }
+   if (p == "rfio") {
+      gSystem->Setenv("STAGE_HOST","castorpublic.cern.ch");
+      gPfx = p + ":/castor/cern.ch/user/s/sftnight/StressIOPluginsTestFiles/";
+      return 0;
+   }
    return -1;
 }
 
-void stressIOPluginsForProto(const char *protoName /*=0*/)
+Bool_t running_as_sftnight_with_kerberos() {
+   UserGroup_t *ug = gSystem->GetUserInfo((const char*)0);
+   if (!ug) {
+     return kFALSE;
+   }
+   if (ug->fUser != "sftnight") {
+     delete ug;
+     return kFALSE;
+   }
+   delete ug;
+   return (gSystem->Exec("(klist | grep sftnight@CERN.CH) > /dev/null 2>&1") == 0);
+}
+
+void stressIOPluginsForProto(const char *protoName /*=0*/, int multithread /*=0*/)
 {
    //Main control function invoking all test programs
    if (!protoName) {
@@ -168,8 +201,21 @@ void stressIOPluginsForProto(const char *protoName /*=0*/)
      return;
    }
 
+   if (!strcmp(protoName,"rfio")) {
+     if (!running_as_sftnight_with_kerberos()) {
+       printf("* Skipping protocol test for '%s' because it needs to be "
+              "run as the CERN sftnight user and have its kerberos token\n", protoName);
+       return;
+     }
+   }
+
    if (setPath(protoName)) {
      printf("No server and path available to test protocol %s\n", protoName);
+     return;
+   }
+
+   if (multithread) {
+     printf("No multithreaded tests are available\n");
      return;
    }
 
@@ -182,6 +228,7 @@ void stressIOPluginsForProto(const char *protoName /*=0*/)
    stressIOPlugins1();
    stressIOPlugins2();
    stressIOPlugins3();
+   stressIOPlugins4();
 
    cleanup();
 
@@ -190,7 +237,7 @@ void stressIOPluginsForProto(const char *protoName /*=0*/)
 
 void stressIOPlugins()
 {
-   stressIOPluginsForProto((const char*)0);
+   stressIOPluginsForProto((const char*)0,0);
 }
 
 //_______________________________________________________________
@@ -358,6 +405,139 @@ void stressIOPlugins3()
    }
 }
 
+//_______________________________________________________________
+void stressIOPlugins4()
+{
+   Long64_t nent;
+   Bool_t tryquery = kTRUE;
+   Bool_t trywildcard = kFALSE;
+   Bool_t tryqueryInAdd = kFALSE;
+
+   const char *title = "Filename formats when adding files to TChain";
+   Bprint(4,title);
+   printf("using Event_8a.root and Event_8b.root\n");
+
+   if (gCurProtoName == "rfio") {
+      tryquery = kFALSE;
+   }
+
+   if (gCurProtoName == "xroot" || gCurProtoName == "root" || gCurProtoName == "rfio") {
+      trywildcard = kTRUE;
+   }
+
+   if (gCurProtoName == "http" || gCurProtoName == "https") {
+      tryqueryInAdd = kTRUE;
+   }
+
+   {
+      Bprint(0,"treename in chain");
+      TChain  mychain("T");
+      mychain.AddFile(gPfx + "Event_8a.root");
+      mychain.AddFile(gPfx + "Event_8b.root");
+      nent = mychain.GetEntries();
+      if (nent != 200) {
+         printf("FAILED\n");
+      } else {
+         printf("OK\n");
+      }
+   }
+   {
+      Bprint(0,"treename to AddFile");
+      TChain  mychain("nosuchtree");
+      mychain.AddFile(gPfx + "Event_8a.root", TChain::kBigNumber, "T");
+      mychain.AddFile(gPfx + "Event_8b.root", TChain::kBigNumber, "T");
+      nent = mychain.GetEntries();
+      if (nent != 200) {
+         printf("FAILED\n");
+      } else {
+         printf("OK\n");
+      }
+   }
+   {
+      Bprint(0,"treename in filenames, slash-suffix style");
+      TChain  mychain("nosuchtree");
+      mychain.AddFile(gPfx + "Event_8a.root/T");
+      mychain.AddFile(gPfx + "Event_8b.root/T");
+      nent = mychain.GetEntries();
+      if (nent != 200) {
+         printf("FAILED\n");
+      } else {
+         printf("OK\n");
+      }
+   }
+   {
+      Bprint(0,"bad treename to AddFile, good in filename");
+      TChain  mychain("nosuchtree");
+      mychain.AddFile(gPfx + "Event_8a.root/T", TChain::kBigNumber, "nosuchtree2");
+      mychain.AddFile(gPfx + "Event_8b.root/T", TChain::kBigNumber, "nosuchtree2");
+      nent = mychain.GetEntries();
+      if (nent != 200) {
+         printf("FAILED\n");
+      } else {
+         printf("OK\n");
+      }
+   }
+   if (tryquery) {
+      Bprint(0,"treename and url query in filename");
+      TChain  mychain("nosuchtree");
+      mychain.AddFile(gPfx + "Event_8a.root/T?myq=xyz");
+      mychain.AddFile(gPfx + "Event_8b.root/T?myq=xyz");
+      nent = mychain.GetEntries();
+      if (nent != 200) {
+         printf("FAILED\n");
+      } else {
+         printf("OK\n");
+      }
+   }
+   if (tryquery) {
+      Bprint(0,"treename given in url frag in filename");
+      TChain  mychain("nosuchtree");
+      mychain.AddFile(gPfx + "Event_8a.root?myq=xyz#T");
+      mychain.AddFile(gPfx + "Event_8b.root?myq=xyz#T");
+      nent = mychain.GetEntries();
+      if (nent != 200) {
+         printf("FAILED\n");
+      } else {
+         printf("OK\n");
+      }
+   }
+   if (tryqueryInAdd) {
+      Bprint(0,"filename with a url query in Add");
+      TChain  mychain("T");
+      mychain.Add(gPfx + "Event_8a.root?myq=xyz");
+      mychain.Add(gPfx + "Event_8b.root?myq=xyz");
+      nent = mychain.GetEntries();
+      if (nent != 200) {
+         printf("FAILED\n");
+      } else {
+         printf("OK\n");
+      }
+   }
+   if (trywildcard) {
+      Bprint(0,"wildcarded filename");
+      TChain  mychain("T");
+      mychain.Add(gPfx + "Event_8*ot");
+      nent = mychain.GetEntries();
+      if (nent != 200) {
+         printf("FAILED\n");
+      } else {
+         printf("OK\n");
+      }
+   }
+
+   if (trywildcard) {
+      Bprint(0,"wildcarded filename with treename");
+      TChain  mychain("nosuchtree");
+      mychain.Add(gPfx + "Event_8*.root/T");
+      nent = mychain.GetEntries();
+      if (nent != 200) {
+         printf("FAILED\n");
+      } else {
+         printf("OK\n");
+      }
+   }
+}
+      
 void cleanup()
 {
    TString psfname = TString::Format("stressIOPlugins-%d.ps", gSystem->GetPid());

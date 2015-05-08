@@ -295,7 +295,7 @@ ifneq ($(ARCH),win32)
 MODULES      += net/rpdutils net/rootd proof/proofd proof/pq2 proof/proofbench
 endif
 ifeq ($(BUILDTMVA),yes)
-MODULES      += tmva math/genetic
+MODULES      += tmva/tmva tmva/tmvagui math/genetic
 endif
 ifeq ($(HASXRD),yes)
 ifeq ($(BUILDXRDCLT),no)
@@ -311,6 +311,9 @@ endif
 ifeq ($(BUILDHTTP),yes)
 MODULES      += net/http
 endif
+ifeq ($(BUILDR),yes)
+MODULES      += bindings/r
+endif
 
 -include MyModules.mk   # allow local modules
 
@@ -325,14 +328,14 @@ MODULES      += core/unix core/winnt graf2d/x11 graf2d/x11ttf \
                 graf2d/qt gui/qtroot gui/qtgsi net/netx net/netxng net/alien \
                 proof/proofd proof/proofx proof/pq2 graf3d/x3d net/davix \
                 sql/oracle io/xmlparser math/mathmore \
-                tmva math/genetic io/hdfs graf2d/fitsio roofit/roofitcore \
+                tmva/tmva tmva/tmvagui math/genetic io/hdfs graf2d/fitsio roofit/roofitcore \
                 roofit/roofit roofit/roostats roofit/histfactory \
                 math/minuit2 net/monalisa math/fftw sql/odbc math/unuran \
                 geom/geocad geom/gdml graf3d/eve net/glite misc/memstat \
                 math/genvector net/bonjour graf3d/gviz3d graf2d/gviz \
                 proof/proofbench proof/afdsmgrd graf2d/ios \
                 graf2d/quartz graf2d/cocoa core/macosx math/vc math/vdt \
-                net/http
+                net/http  bindings/r
 MODULES      := $(sort $(MODULES))   # removes duplicates
 endif
 
@@ -548,7 +551,7 @@ endif
 
 COREBASEDIRS := $(ROOT_SRCDIR)/core/base/src
 COREBASEDIRI := $(ROOT_SRCDIR)/core/base/inc
-COREL0        = -I$(ROOT_SRCDIR) $(COREBASEDIRI)/LinkDef.h 
+COREL0        = -I$(ROOT_SRCDIR) $(COREBASEDIRI)/LinkDef.h
 COREL         = $(BASEL1) $(BASEL2) $(BASEL3) $(CONTL) $(METAL) $(ZIPL) \
                 $(SYSTEML) $(CLIBL) $(METAUTILSL) $(TEXTINPUTL)
 COREDS       := $(call stripsrc,$(COREBASEDIRS)/G__Core.cxx)
@@ -1360,16 +1363,17 @@ runtimedirs:
 	$(RSYNC) \
 		--include '*.py' \
 		--exclude '*' \
-		$(ROOT_SRCDIR)/geom/gdml/ geom/gdml ; \
-	echo "Rsync'ing $(ROOT_SRCDIR)/tmva/test/*.C, *.gif, *.png..."; \
-   mkdir -p tmva/test; \
-	$(RSYNC) \
-		--include '*.C' \
-		--include '*.gif' \
-		--include '*.png' \
-		--include 'README' \
-		--exclude '*' \
-		$(ROOT_SRCDIR)/tmva/test/ tmva/test ;
+		$(ROOT_SRCDIR)/geom/gdml/ geom/gdml ; 
+#		$(ROOT_SRCDIR)/geom/gdml/ geom/gdml ; \
+#	echo "Rsync'ing $(ROOT_SRCDIR)/tmva/test/*.C, *.gif, *.png..."; \
+#   mkdir -p tmva/test; \
+#	$(RSYNC) \
+#		--include '*.C' \
+#		--include '*.gif' \
+#		--include '*.png' \
+#		--include 'README' \
+#		--exclude '*' \
+#		$(ROOT_SRCDIR)/tmva/test/ tmva/test ;
 endif
 
 showbuild:

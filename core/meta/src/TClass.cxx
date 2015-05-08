@@ -1290,7 +1290,7 @@ void TClass::Init(const char *name, Version_t cversion,
    // See also TCling::GenerateTClass() which will update fClassVersion after creation!
    fStreamerInfo   = new TObjArray(fClassVersion+2+10,-1); // +10 to read new data by old
    fProperty       = -1;
-   fClassProperty  = -1;
+   fClassProperty  = 0;
 
    ResetInstanceCount();
 
@@ -1550,7 +1550,7 @@ TClass::~TClass()
       fData->Delete();
    delete fData;   fData = 0;
 
-   if (fEnums)
+   if (fEnums.load())
       (*fEnums).Delete();
    delete fEnums.load(); fEnums = 0;
 
@@ -2405,42 +2405,43 @@ TClass *TClass::GetActualClass(const void *object) const
    // class.
 
    if (object==0) return (TClass*)this;
-   if (!IsLoaded()) {
-      TVirtualStreamerInfo* sinfo = GetStreamerInfo();
-      if (sinfo) {
-         return sinfo->GetActualClass(object);
-      }
-      return (TClass*)this;
-   }
    if (fIsA) {
       return (*fIsA)(object); // ROOT::IsA((ThisClass*)object);
    } else if (fGlobalIsA) {
       return fGlobalIsA(this,object);
    } else {
-      //Always call IsA via the interpreter. A direct call like
-      //      object->IsA(brd, parent);
-      //will not work if the class derives from TObject but not as primary
-      //inheritance.
-      if (fIsAMethod.load()==0) {
-         TMethodCall* temp = new TMethodCall((TClass*)this, "IsA", "");
+      if (IsTObject()) {
 
-         if (!temp->GetMethod()) {
-            delete temp;
-            Error("IsA","Can not find any IsA function for %s!",GetName());
-            return (TClass*)this;
+         if (!fIsOffsetStreamerSet) {
+            CalculateStreamerOffset();
          }
-         //Force cache to be updated here so do not have to worry about concurrency
-         temp->ReturnType();
+         TObject* realTObject = (TObject*)((size_t)object + fOffsetStreamer);
 
-         TMethodCall* expected = nullptr;
-         if( !fIsAMethod.compare_exchange_strong(expected,temp) ) {
-            //another thread beat us to it
-            delete temp;
+         return realTObject->IsA();
+      }
+
+      if (HasInterpreterInfo()) {
+
+         TVirtualIsAProxy *isa = 0;
+         if (GetClassInfo() && gCling->ClassInfo_HasMethod(fClassInfo,"IsA")) {
+            isa = (TVirtualIsAProxy*)gROOT->ProcessLineFast(TString::Format("new ::TInstrumentedIsAProxy<%s>(0);",GetName()));
+         }
+         else {
+            isa = (TVirtualIsAProxy*)gROOT->ProcessLineFast(TString::Format("new ::TIsAProxy(typeid(%s));",GetName()));
+         }
+         if (isa) {
+            R__LOCKGUARD(gInterpreterMutex);
+            const_cast<TClass*>(this)->fIsA = isa;
+         }
+         if (fIsA) {
+            return (*fIsA)(object); // ROOT::IsA((ThisClass*)object);
          }
       }
-      char * char_result = 0;
-      (*fIsAMethod).Execute((void*)object, &char_result);
-      return (TClass*)char_result;
+      TVirtualStreamerInfo* sinfo = GetStreamerInfo();
+      if (sinfo) {
+         return sinfo->GetActualClass(object);
+      }
+      return (TClass*)this;
    }
 }
 
@@ -2657,6 +2658,17 @@ namespace {
       }
    };
 }
+
+//______________________________________________________________________________
+ROOT::ESTLType TClass::GetCollectionType() const
+{
+   // Return the 'type' of the STL the TClass is representing.
+   // and return ROOT::kNotSTL if it is not representing an STL collection.
+   auto proxy = GetCollectionProxy();
+   if (proxy) return (ROOT::ESTLType)proxy->GetCollectionType();
+   return ROOT::kNotSTL;
+}
+
 
 //______________________________________________________________________________
 TVirtualCollectionProxy *TClass::GetCollectionProxy() const
@@ -3355,7 +3367,7 @@ TList *TClass::GetListOfEnums(Bool_t load /* = kTRUE */)
       if (fProperty == -1) Property();
       if (! ((kIsClass | kIsStruct | kIsUnion) & fProperty) ) {
          R__LOCKGUARD(gInterpreterMutex);
-         if (fEnums) {
+         if (fEnums.load()) {
             return fEnums.load();
          }
          //namespaces can have enums added to them
@@ -3368,7 +3380,7 @@ TList *TClass::GetListOfEnums(Bool_t load /* = kTRUE */)
    }
 
    R__LOCKGUARD(gInterpreterMutex);
-   if (fEnums) {
+   if (fEnums.load()) {
       if (load) (*fEnums).Load();
       return fEnums.load();
    }
@@ -5690,7 +5702,7 @@ void TClass::SetUnloaded()
    if (fData) {
       fData->Unload();
    }
-   if (fEnums) {
+   if (fEnums.load()) {
       (*fEnums).Unload();
    }
 
@@ -5950,8 +5962,10 @@ UInt_t TClass::GetCheckSum(ECheckSum code, Bool_t &isvalid) const
 
          if (code > kWithTypeDef || code == kReflexNoComment) {
             type = tdm->GetTrueTypeName();
-            if (TClassEdit::IsSTLCont(type))
-               type = TClassEdit::ShortType( type, TClassEdit::kDropStlDefault );
+            // GetTrueTypeName uses GetFullyQualifiedName which already drops
+            // the default template parameter, so we no longer need to do this.
+            //if (TClassEdit::IsSTLCont(type))
+            //   type = TClassEdit::ShortType( type, TClassEdit::kDropStlDefault );
             if (code == kReflex || code == kReflexNoComment) {
                if (prop&kIsEnum) {
                   type = "int";
@@ -5965,8 +5979,10 @@ UInt_t TClass::GetCheckSum(ECheckSum code, Bool_t &isvalid) const
             }
          } else {
             type = tdm->GetFullTypeName();
-            if (TClassEdit::IsSTLCont(type))
-               type = TClassEdit::ShortType( type, TClassEdit::kDropStlDefault );
+            // GetFullTypeName uses GetFullyQualifiedName which already drops
+            // the default template parameter, so we no longer need to do this.
+            //if (TClassEdit::IsSTLCont(type))
+            //   type = TClassEdit::ShortType( type, TClassEdit::kDropStlDefault );
          }
 
          il = type.Length();

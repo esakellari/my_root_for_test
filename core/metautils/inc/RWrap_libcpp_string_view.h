@@ -22,6 +22,8 @@
 // To import a new version of the original file do:
 //
 /*
+ svn co http://llvm.org/svn/llvm-project/libcxx/trunk libcxx
+
  cat original/string_view | \
  sed -e 's:_LIBCPP_BEGIN_NAMESPACE_LFTS:_ROOT_LIBCPP_BEGIN_NAMESPACE_LFTS:' \
      -e 's:_LIBCPP_END_NAMESPACE_LFTS:_ROOT_LIBCPP_END_NAMESPACE_LFTS:' \
@@ -38,15 +40,12 @@
 #include <iomanip>
 #include <stdexcept>
 
-#define R_HAS_std_experimental_string_view
-
 #ifndef R__WIN32
 
 #define _ROOT_LIBCPP_BEGIN_NAMESPACE_LFTS \
 namespace std { \
 namespace experimental { inline namespace __ROOT {
 #define _ROOT_LIBCPP_END_NAMESPACE_LFTS } } }
-
 #else
 
 // Microsoft compiler does not support inline namespace yet.
@@ -109,6 +108,11 @@ namespace experimental { namespace __ROOT {
 #define _NOEXCEPT
 #endif
 
+#ifndef _LIBCPP_ASSERT
+#define _LOCAL_LIBCPP_ASSERT
+#define _LIBCPP_ASSERT(X,Y) ((void)0)
+#endif
+
 /* Also used:
  _LIBCPP_TYPE_VIS_ONLY
  _LIBCPP_CONSTEXPR_AFTER_CXX11
@@ -166,56 +170,265 @@ inline namespace __1 {
       return __os;
    }
 
-   template <typename _CharT, typename _SizeT, typename _Traits, _SizeT __npos>
-   _SizeT
-   __str_find(_CharT* __p, _SizeT __sz, _CharT *__s, _SizeT __pos, _SizeT __n)
+#ifdef _LOCAL_VSTD
+   // search
+
+   template <class _BinaryPredicate, class _ForwardIterator1, class _ForwardIterator2>
+   _ForwardIterator1
+   __search(_ForwardIterator1 __first1, _ForwardIterator1 __last1,
+            _ForwardIterator2 __first2, _ForwardIterator2 __last2, _BinaryPredicate __pred,
+            forward_iterator_tag, forward_iterator_tag)
    {
-      //_LIBCPP_ASSERT(__n == 0 || __s != nullptr, "string::find(): recieved nullptr");
-      if (__pos > __sz || __sz - __pos < __n)
-         return __npos;
+      if (__first2 == __last2)
+         return __first1;  // Everything matches an empty sequence
+      while (true)
+      {
+         // Find first element in sequence 1 that matchs *__first2, with a mininum of loop checks
+         while (true)
+         {
+            if (__first1 == __last1)  // return __last1 if no element matches *__first2
+               return __last1;
+            if (__pred(*__first1, *__first2))
+               break;
+            ++__first1;
+         }
+         // *__first1 matches *__first2, now match elements after here
+         _ForwardIterator1 __m1 = __first1;
+         _ForwardIterator2 __m2 = __first2;
+         while (true)
+         {
+            if (++__m2 == __last2)  // If pattern exhausted, __first1 is the answer (works for 1 element pattern)
+               return __first1;
+            if (++__m1 == __last1)  // Otherwise if source exhaused, pattern not found
+               return __last1;
+            if (!__pred(*__m1, *__m2))  // if there is a mismatch, restart with a new __first1
+            {
+               ++__first1;
+               break;
+            }  // else there is a match, check next elements
+         }
+      }
+   }
+
+   template <class _BinaryPredicate, class _RandomAccessIterator1, class _RandomAccessIterator2>
+   _LIBCPP_CONSTEXPR_AFTER_CXX11 _RandomAccessIterator1
+   __search(_RandomAccessIterator1 __first1, _RandomAccessIterator1 __last1,
+            _RandomAccessIterator2 __first2, _RandomAccessIterator2 __last2, _BinaryPredicate __pred,
+            random_access_iterator_tag, random_access_iterator_tag)
+   {
+      typedef typename std::iterator_traits<_RandomAccessIterator1>::difference_type _D1;
+      typedef typename std::iterator_traits<_RandomAccessIterator2>::difference_type _D2;
+      // Take advantage of knowing source and pattern lengths.  Stop short when source is smaller than pattern
+      _D2 __len2 = __last2 - __first2;
+      if (__len2 == 0)
+         return __first1;
+      _D1 __len1 = __last1 - __first1;
+      if (__len1 < __len2)
+         return __last1;
+      const _RandomAccessIterator1 __s = __last1 - (__len2 - 1);  // Start of pattern match can't go beyond here
+      while (true)
+      {
+#if !_LIBCPP_UNROLL_LOOPS
+         while (true)
+         {
+            if (__first1 == __s)
+               return __last1;
+            if (__pred(*__first1, *__first2))
+               break;
+            ++__first1;
+         }
+#else  // !_LIBCPP_UNROLL_LOOPS
+         for (_D1 __loop_unroll = (__s - __first1) / 4; __loop_unroll > 0; --__loop_unroll)
+         {
+            if (__pred(*__first1, *__first2))
+               goto __phase2;
+            if (__pred(*++__first1, *__first2))
+               goto __phase2;
+            if (__pred(*++__first1, *__first2))
+               goto __phase2;
+            if (__pred(*++__first1, *__first2))
+               goto __phase2;
+            ++__first1;
+         }
+         switch (__s - __first1)
+         {
+            case 3:
+               if (__pred(*__first1, *__first2))
+                  break;
+               ++__first1;
+            case 2:
+               if (__pred(*__first1, *__first2))
+                  break;
+               ++__first1;
+            case 1:
+               if (__pred(*__first1, *__first2))
+                  break;
+            case 0:
+               return __last1;
+         }
+      __phase2:
+#endif  // !_LIBCPP_UNROLL_LOOPS
+         _RandomAccessIterator1 __m1 = __first1;
+         _RandomAccessIterator2 __m2 = __first2;
+#if !_LIBCPP_UNROLL_LOOPS
+         while (true)
+         {
+            if (++__m2 == __last2)
+               return __first1;
+            ++__m1;          // no need to check range on __m1 because __s guarantees we have enough source
+            if (!__pred(*__m1, *__m2))
+            {
+               ++__first1;
+               break;
+            }
+         }
+#else  // !_LIBCPP_UNROLL_LOOPS
+         ++__m2;
+         ++__m1;
+         for (_D2 __loop_unroll = (__last2 - __m2) / 4; __loop_unroll > 0; --__loop_unroll)
+         {
+            if (!__pred(*__m1, *__m2))
+               goto __continue;
+            if (!__pred(*++__m1, *++__m2))
+               goto __continue;
+            if (!__pred(*++__m1, *++__m2))
+               goto __continue;
+            if (!__pred(*++__m1, *++__m2))
+               goto __continue;
+            ++__m1;
+            ++__m2;
+         }
+         switch (__last2 - __m2)
+         {
+            case 3:
+               if (!__pred(*__m1, *__m2))
+                  break;
+               ++__m1;
+               ++__m2;
+            case 2:
+               if (!__pred(*__m1, *__m2))
+                  break;
+               ++__m1;
+               ++__m2;
+            case 1:
+               if (!__pred(*__m1, *__m2))
+                  break;
+            case 0:
+               return __first1;
+         }
+      __continue:
+         ++__first1;
+#endif  // !_LIBCPP_UNROLL_LOOPS
+      }
+   }
+
+#endif // _LOCAL_VSTD for __search
+
+   template <class _ForwardIterator1, class _ForwardIterator2, class _BinaryPredicate>
+   _LIBCPP_CONSTEXPR_AFTER_CXX11 _ForwardIterator1
+   __find_first_of_ce(_ForwardIterator1 __first1, _ForwardIterator1 __last1,
+                      _ForwardIterator2 __first2, _ForwardIterator2 __last2, _BinaryPredicate __pred)
+   {
+      for (; __first1 != __last1; ++__first1)
+         for (_ForwardIterator2 __j = __first2; __j != __last2; ++__j)
+            if (__pred(*__first1, *__j))
+               return __first1;
+      return __last1;
+   }
+
+   // __str_find
+   template<class _CharT, class _SizeT, class _Traits, _SizeT __npos>
+   _SizeT _LIBCPP_CONSTEXPR_AFTER_CXX11 _LIBCPP_INLINE_VISIBILITY
+   __str_find(const _CharT *__p, _SizeT __sz,
+              _CharT __c, _SizeT __pos) _NOEXCEPT
+   {
+   if (__pos >= __sz)
+      return __npos;
+   const _CharT* __r = _Traits::find(__p + __pos, __sz - __pos, __c);
+   if (__r == 0)
+      return __npos;
+   return static_cast<_SizeT>(__r - __p);
+}
+
+   template<class _CharT, class _SizeT, class _Traits, _SizeT __npos>
+   _SizeT _LIBCPP_CONSTEXPR_AFTER_CXX11 _LIBCPP_INLINE_VISIBILITY
+   __str_find(const _CharT *__p, _SizeT __sz,
+              const _CharT* __s, _SizeT __pos, _SizeT __n)
+   {
+     if (__pos > __sz || __sz - __pos < __n)
+        return __npos;
       if (__n == 0)
          return __pos;
-      const _CharT* __r = _VSTD::search(__p + __pos, __p + __sz, __s, __s + __n,
-                                        _Traits::eq);
+      const _CharT* __r =
+      _VSTD::__search(__p + __pos, __p + __sz,
+                      __s, __s + __n, _Traits::eq,
+                      random_access_iterator_tag(), random_access_iterator_tag());
       if (__r == __p + __sz)
          return __npos;
       return static_cast<_SizeT>(__r - __p);
    }
 
 
-   template <typename _CharT, typename _SizeT, typename _Traits, _SizeT __npos>
-   _SizeT
-   __str_rfind(_CharT* __p, _SizeT __sz, _CharT *__s, _SizeT __pos, _SizeT __n)
+   // __str_rfind
+
+   template<class _CharT, class _SizeT, class _Traits, _SizeT __npos>
+   _SizeT _LIBCPP_CONSTEXPR_AFTER_CXX11 _LIBCPP_INLINE_VISIBILITY
+   __str_rfind(const _CharT *__p, _SizeT __sz,
+               _CharT __c, _SizeT __pos)
    {
-      //_LIBCPP_ASSERT(__n == 0 || __s != nullptr, "string::rfind(): recieved nullptr");
+      if (__sz < 1)
+         return __npos;
+      if (__pos < __sz)
+         ++__pos;
+      else
+         __pos = __sz;
+      for (const _CharT* __ps = __p + __pos; __ps != __p;)
+      {
+         if (_Traits::eq(*--__ps, __c))
+            return static_cast<_SizeT>(__ps - __p);
+      }
+      return __npos;
+   }
+
+   template<class _CharT, class _SizeT, class _Traits, _SizeT __npos>
+   _SizeT _LIBCPP_CONSTEXPR_AFTER_CXX11 _LIBCPP_INLINE_VISIBILITY
+   __str_rfind(const _CharT *__p, _SizeT __sz,
+               const _CharT* __s, _SizeT __pos, _SizeT __n)
+   {
       __pos = _VSTD::min(__pos, __sz);
       if (__n < __sz - __pos)
          __pos += __n;
       else
          __pos = __sz;
-      const _CharT* __r = _VSTD::find_end(__p, __p + __pos, __s, __s + __n,
-                                          _Traits::eq());
+      const _CharT* __r = _VSTD::__find_end(
+                                            __p, __p + __pos, __s, __s + __n, _Traits::eq,
+                                            random_access_iterator_tag(), random_access_iterator_tag());
       if (__n > 0 && __r == __p + __pos)
          return __npos;
       return static_cast<_SizeT>(__r - __p);
    }
 
-   template <typename _CharT, typename _SizeT, typename _Traits, size_t __npos>
-   _SizeT
-   __str_find_first_of(_CharT* __p, _SizeT __sz, _CharT *__s, _SizeT __pos, _SizeT __n)
+   // __str_find_first_of
+   template<class _CharT, class _SizeT, class _Traits, _SizeT __npos>
+   _SizeT _LIBCPP_CONSTEXPR_AFTER_CXX11 _LIBCPP_INLINE_VISIBILITY
+   __str_find_first_of(const _CharT *__p, _SizeT __sz,
+                       const _CharT* __s, _SizeT __pos, _SizeT __n)
    {
       if (__pos >= __sz || __n == 0)
          return __npos;
-      const _CharT* __r = _VSTD::find_first_of
+      const _CharT* __r = _VSTD::__find_first_of_ce
       (__p + __pos, __p + __sz, __s, __s + __n, _Traits::eq );
       if (__r == __p + __sz)
          return __npos;
       return static_cast<_SizeT>(__r - __p);
    }
 
-   template <typename _CharT, typename _SizeT, typename _Traits, _SizeT __npos>
-   _SizeT
-   __str_find_last_of(_CharT* __p, _SizeT __sz, _CharT *__s, _SizeT __pos, _SizeT __n)
+
+   // __str_find_last_of
+   template<class _CharT, class _SizeT, class _Traits, _SizeT __npos>
+   _SizeT _LIBCPP_CONSTEXPR_AFTER_CXX11 _LIBCPP_INLINE_VISIBILITY
+   __str_find_last_of(const _CharT *__p, _SizeT __sz,
+                      const _CharT* __s, _SizeT __pos, _SizeT __n)
    {
       if (__n != 0)
       {
@@ -233,9 +446,12 @@ inline namespace __1 {
       return __npos;
    }
 
-   template <typename _CharT, typename _SizeT, typename _Traits, _SizeT __npos>
-   _SizeT
-   __str_find_first_not_of(_CharT* __p, _SizeT __sz, _CharT *__s, _SizeT __pos, _SizeT __n)
+
+   // __str_find_first_not_of
+   template<class _CharT, class _SizeT, class _Traits, _SizeT __npos>
+   _SizeT _LIBCPP_CONSTEXPR_AFTER_CXX11 _LIBCPP_INLINE_VISIBILITY
+   __str_find_first_not_of(const _CharT *__p, _SizeT __sz,
+                           const _CharT* __s, _SizeT __pos, _SizeT __n)
    {
       if (__pos < __sz)
       {
@@ -247,9 +463,28 @@ inline namespace __1 {
       return __npos;
    }
 
-   template <typename _CharT, typename _SizeT, typename _Traits, _SizeT __npos>
-   _SizeT
-   __str_find_last_not_of(_CharT* __p, _SizeT __sz, _CharT *__s, _SizeT __pos, _SizeT __n)
+
+   template<class _CharT, class _SizeT, class _Traits, _SizeT __npos>
+   _SizeT _LIBCPP_CONSTEXPR_AFTER_CXX11 _LIBCPP_INLINE_VISIBILITY
+   __str_find_first_not_of(const _CharT *__p, _SizeT __sz,
+                           _CharT __c, _SizeT __pos)
+   {
+      if (__pos < __sz)
+      {
+         const _CharT* __pe = __p + __sz;
+         for (const _CharT* __ps = __p + __pos; __ps != __pe; ++__ps)
+            if (!_Traits::eq(*__ps, __c))
+               return static_cast<_SizeT>(__ps - __p);
+      }
+      return __npos;
+   }
+
+
+   // __str_find_last_not_of
+   template<class _CharT, class _SizeT, class _Traits, _SizeT __npos>
+   _SizeT _LIBCPP_CONSTEXPR_AFTER_CXX11 _LIBCPP_INLINE_VISIBILITY
+   __str_find_last_not_of(const _CharT *__p, _SizeT __sz,
+                          const _CharT* __s, _SizeT __pos, _SizeT __n)
    {
       if (__pos < __sz)
          ++__pos;
@@ -261,8 +496,25 @@ inline namespace __1 {
       return __npos;
    }
 
-}
-}
+
+   template<class _CharT, class _SizeT, class _Traits, _SizeT __npos>
+   _SizeT _LIBCPP_CONSTEXPR_AFTER_CXX11 _LIBCPP_INLINE_VISIBILITY
+   __str_find_last_not_of(const _CharT *__p, _SizeT __sz,
+                          _CharT __c, _SizeT __pos)
+   {
+      if (__pos < __sz)
+         ++__pos;
+      else
+         __pos = __sz;
+      for (const _CharT* __ps = __p + __pos; __ps != __p;)
+         if (!_Traits::eq(*--__ps, __c))
+            return static_cast<_SizeT>(__ps - __p);
+      return __npos;
+   }
+
+} // namespace __1 or __ROOT
+
+} // namespace std
 
 // Now include the main meat
 #include "libcpp_string_view.h"
@@ -305,6 +557,10 @@ inline namespace __1 {
 
 #ifdef _LOCAL_NOEXCEPT
 #undef _NOEXCEPT
+#endif
+
+#ifdef _LOCAL_LIBCPP_ASSERT
+#undef _LIBCPP_ASSERT
 #endif
 
 #endif // RWrap_libcpp_string_view_h

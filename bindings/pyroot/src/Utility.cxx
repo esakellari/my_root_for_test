@@ -9,6 +9,7 @@
 #include "MethodProxy.h"
 #include "TFunctionHolder.h"
 #include "TCustomPyTypes.h"
+#include "TemplateProxy.h"
 #include "RootWrapper.h"
 #include "PyCallable.h"
 
@@ -22,6 +23,7 @@
 #include "TCollection.h"
 #include "TDataType.h"
 #include "TFunction.h"
+#include "TFunctionTemplate.h"
 #include "TMethod.h"
 #include "TMethodArg.h"
 #include "TError.h"
@@ -237,7 +239,8 @@ Bool_t PyROOT::Utility::AddToClass( PyObject* pyclass, const char* label, PyCall
          PyErr_Clear();
       Py_XDECREF( (PyObject*)method );
       method = MethodProxy_New( label, pyfunc );
-      Bool_t isOk = PyObject_SetAttrString( pyclass, const_cast< char* >( label ), (PyObject*)method ) == 0;
+      Bool_t isOk = PyObject_SetAttrString(
+         pyclass, const_cast< char* >( label ), (PyObject*)method ) == 0;
       Py_DECREF( method );
       return isOk;
    }
@@ -361,8 +364,9 @@ Bool_t PyROOT::Utility::AddBinaryOperator( PyObject* pyclass, const std::string&
 
 // This function can be called too early when setting up some of the ROOT core classes,
 // which in turn can trigger the creation of a (default) TApplication. Wait with looking
-// for binary operators until fully initialized.
-   if ( !gApplication )
+// for binary operators '!=' and '==' (which are set early in Pythonize.cxx) until fully
+// initialized. Other operators are expected to have entered from user code.
+   if ( !gApplication && (strcmp( op, "==" ) == 0 || strcmp( op, "!=" ) == 0) )
       return kFALSE;
 
 // For GNU on clang, search the internal __gnu_cxx namespace for binary operators (is
@@ -391,6 +395,17 @@ Bool_t PyROOT::Utility::AddBinaryOperator( PyObject* pyclass, const std::string&
    }
 
    if ( ! pyfunc ) {
+      std::string::size_type pos = lcname.substr(0, lcname.find('<')).rfind( "::" );
+      if ( pos != std::string::npos ) {
+         TClass* lcscope = TClass::GetClass( lcname.substr( 0, pos ).c_str() );
+         if ( lcscope ) {
+            Cppyy::TCppMethod_t func = FindAndAddOperator( lcname, rcname, op, lcscope );
+            if ( func ) pyfunc = new TFunctionHolder( Cppyy::GetScope( lcname.substr( 0, pos ) ), func );
+         }
+      }
+   }
+
+   if ( ! pyfunc ) {
       Cppyy::TCppMethod_t func = FindAndAddOperator( lcname, rcname, op );
       if ( func ) pyfunc = new TFunctionHolder( Cppyy::gGlobalScope, func );
    }
@@ -408,6 +423,18 @@ Bool_t PyROOT::Utility::AddBinaryOperator( PyObject* pyclass, const std::string&
       fname  << lcname << ", " << rcname << ">";
       Cppyy::TCppMethod_t func = (Cppyy::TCppMethod_t)_pr_int->GetMethodAny( fname.str().c_str() );
       if ( func ) pyfunc = new TFunctionHolder( Cppyy::GetScope( "_pyroot_internal" ), func );
+   }
+
+// last chance: there could be a non-instantiated templated method
+   TClass* lc = TClass::GetClass( lcname.c_str() );
+   if ( lc && strcmp(op, "==") != 0 && strcmp(op, "!=") != 0 ) {
+      std::string opname = "operator"; opname += op;
+      gInterpreter->LoadFunctionTemplates(lc);
+      gInterpreter->GetFunctionTemplate(lc->GetClassInfo(), opname.c_str());
+      TFunctionTemplate*f = lc->GetFunctionTemplate(opname.c_str());
+      Cppyy::TCppMethod_t func =
+         (Cppyy::TCppMethod_t)lc->GetMethodWithPrototype( opname.c_str(), rcname.c_str() );
+      if ( func && f ) pyfunc = new TMethodHolder( Cppyy::GetScope( lcname ), func );
    }
 
    if ( pyfunc ) {  // found a matching overload; add to class

@@ -71,7 +71,7 @@
 #include "TListOfFunctionTemplates.h"
 #include "TProtoClass.h"
 #include "TStreamerInfo.h" // This is here to avoid to use the plugin manager
-
+#include "ThreadLocalStorage.h"
 #include "TFile.h"
 
 #include "clang/AST/ASTContext.h"
@@ -126,6 +126,7 @@
 
 #ifndef R__WIN32
 #include <cxxabi.h>
+#define R__DLLEXPORT
 #endif
 #include <limits.h>
 #include <stdio.h>
@@ -168,18 +169,11 @@ extern "C" {
 #include "Windows4Root.h"
 #include <Psapi.h>
 #undef GetModuleFileName
-#define RTLD_DEFAULT ((void *) -2)
+#define RTLD_DEFAULT ((void *)::GetModuleHandle(NULL))
 #define dlsym(library, function_name) ::GetProcAddress((HMODULE)library, function_name)
-#define dlopen(library_name, flags) ::LoadLibraryEx(library_name, NULL, DONT_RESOLVE_DLL_REFERENCES)
+#define dlopen(library_name, flags) ::LoadLibrary(library_name)
 #define dlclose(library) ::FreeLibrary((HMODULE)library)
-char *dlerror() {
-   thread_local char Msg[1000];
-   FormatMessage(FORMAT_MESSAGE_FROM_SYSTEM, NULL, GetLastError(),
-                 MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT), Msg,
-                 sizeof(Msg), NULL);
-   return Msg;
-}
-#define thread_local static __declspec(thread)
+#define R__DLLEXPORT __declspec(dllexport)
 #endif
 #endif
 
@@ -521,13 +515,13 @@ extern "C" const Decl* TCling__GetObjectDecl(TObject *obj) {
    return ((TClingClassInfo*)obj->IsA()->GetClassInfo())->GetDecl();
 }
 
-extern "C" TInterpreter *CreateInterpreter(void* interpLibHandle)
+extern "C" R__DLLEXPORT TInterpreter *CreateInterpreter(void* interpLibHandle)
 {
    cling::DynamicLibraryManager::ExposeHiddenSharedLibrarySymbols(interpLibHandle);
    return new TCling("C++", "cling C++ Interpreter");
 }
 
-extern "C" void DestroyInterpreter(TInterpreter *interp)
+extern "C" R__DLLEXPORT void DestroyInterpreter(TInterpreter *interp)
 {
    delete interp;
 }
@@ -1009,6 +1003,7 @@ TCling::TCling(const char *name, const char *title)
       clingArgsStorage.push_back("-I");
       clingArgsStorage.push_back(include);
       clingArgsStorage.push_back("-Wno-undefined-inline");
+      clingArgsStorage.push_back("-fsigned-char");
    }
 
    std::vector<const char*> interpArgs;
@@ -1158,7 +1153,7 @@ static const char *FindLibraryName(void (*func)())
    }
 
    HMODULE hMod = (HMODULE) mbi.AllocationBase;
-   thread_local char moduleName[MAX_PATH];
+   TTHREAD_TLS_ARRAY(char, MAX_PATH, moduleName);
 
    if (!GetModuleFileNameA (hMod, moduleName, sizeof (moduleName)))
    {
@@ -1629,7 +1624,8 @@ void TCling::RegisterModule(const char* modulename,
        && strcmp(modulename,"libmapDict")!=0 && strcmp(modulename,"libmultimap2Dict")!=0
        && strcmp(modulename,"libmap2Dict")!=0 && strcmp(modulename,"libmultimapDict")!=0
        && strcmp(modulename,"libsetDict")!=0 && strcmp(modulename,"libmultisetDict")!=0
-       && strcmp(modulename,"libunordered_setDict")!=0
+       && strcmp(modulename,"libunordered_setDict")!=0 && strcmp(modulename,"libunordered_multisetDict")!=0
+       && strcmp(modulename,"libunordered_mapDict")!=0 && strcmp(modulename,"libunordered_multimapDict")!=0
        && strcmp(modulename,"libvalarrayDict")!=0
        && strcmp(modulename,"G__GenVector32")!=0 && strcmp(modulename,"G__Smatrix32")!=0
 
@@ -1824,6 +1820,7 @@ Long_t TCling::ProcessLine(const char* line, EErrorCode* error/*=0*/)
    cling::Interpreter::CompilationResult compRes = cling::Interpreter::kSuccess;
    if (!strncmp(sLine.Data(), ".L", 2) || !strncmp(sLine.Data(), ".x", 2) ||
        !strncmp(sLine.Data(), ".X", 2)) {
+      cling::MetaProcessor::MaybeRedirectOutputRAII RAII(fMetaProcessor);
       // If there was a trailing "+", then CINT compiled the code above,
       // and we will need to strip the "+" before passing the line to cling.
       TString mod_line(sLine);
@@ -2927,9 +2924,11 @@ Int_t TCling::DeleteVariable(const char* name)
 
    clang::QualType qType = varDecl->getType();
    const clang::Type* type = qType->getUnqualifiedDesugaredType();
-   if (type->isPointerType() || type->isReferenceType()) {
+   // Cannot set a reference's address to nullptr; the JIT can place it
+   // into read-only memory (ROOT-7100).
+   if (type->isPointerType()) {
       int** ppInt = (int**)fInterpreter->getAddressOfGlobal(GlobalDecl(varDecl));
-      // set pointer / reference to invalid.
+      // set pointer to invalid.
       if (ppInt) *ppInt = 0;
    }
    return 1;
@@ -3035,7 +3034,7 @@ void TCling::SetClassInfo(TClass* cl, Bool_t reload)
       delete info;
       cl->fClassInfo = 0;
    }
-   if (zombieCandidate && !TClassEdit::IsSTLCont(cl->GetName())) {
+   if (zombieCandidate && !cl->GetCollectionType()) {
       cl->MakeZombie();
    }
    // If we reach here, the info was valid (See early returns).
@@ -4223,8 +4222,8 @@ const char* TCling::TypeName(const char* typeDesc)
    // Return the absolute type of typeDesc.
    // E.g.: typeDesc = "class TNamed**", returns "TNamed".
    // You need to use the result immediately before it is being overwritten.
-   thread_local char* t = 0;
-   thread_local unsigned int tlen = 0;
+   TTHREAD_TLS(char*) t = 0;
+   TTHREAD_TLS(unsigned int) tlen = 0;
 
    unsigned int dlen = strlen(typeDesc);
    if (dlen > tlen) {
@@ -5924,7 +5923,7 @@ Bool_t TCling::LoadText(const char* text) const
 const char* TCling::MapCppName(const char* name) const
 {
    // Interface to cling function
-   thread_local std::string buffer;
+   TTHREAD_TLS_DECL(std::string,buffer);
    ROOT::TMetaUtils::GetCppName(buffer,name);
    return buffer.c_str();
 }
@@ -6607,7 +6606,7 @@ const char* TCling::ClassInfo_FileName(ClassInfo_t* cinfo) const
 const char* TCling::ClassInfo_FullName(ClassInfo_t* cinfo) const
 {
    TClingClassInfo* TClinginfo = (TClingClassInfo*) cinfo;
-   thread_local std::string output;
+   TTHREAD_TLS_DECL(std::string,output);
    TClinginfo->FullName(output,*fNormalizedCtxt);
    return output.c_str();
 }
@@ -6722,7 +6721,7 @@ Long_t TCling::BaseClassInfo_Tagnum(BaseClassInfo_t* bcinfo) const
 const char* TCling::BaseClassInfo_FullName(BaseClassInfo_t* bcinfo) const
 {
    TClingBaseClassInfo* TClinginfo = (TClingBaseClassInfo*) bcinfo;
-   thread_local std::string output;
+   TTHREAD_TLS_DECL(std::string,output);
    TClinginfo->FullName(output,*fNormalizedCtxt);
    return output.c_str();
 }
@@ -6863,7 +6862,7 @@ const char* TCling::DataMemberInfo_Title(DataMemberInfo_t* dminfo) const
 //______________________________________________________________________________
 const char* TCling::DataMemberInfo_ValidArrayIndex(DataMemberInfo_t* dminfo) const
 {
-   thread_local std::string result;
+   TTHREAD_TLS_DECL(std::string,result);
 
    TClingDataMemberInfo* TClinginfo = (TClingDataMemberInfo*) dminfo;
    result = TClinginfo->ValidArrayIndex().str();
@@ -7203,7 +7202,7 @@ TypeInfo_t* TCling::MethodInfo_Type(MethodInfo_t* minfo) const
 const char* TCling::MethodInfo_GetMangledName(MethodInfo_t* minfo) const
 {
    TClingMethodInfo* info = (TClingMethodInfo*) minfo;
-   thread_local  TString mangled_name;
+   TTHREAD_TLS_DECL(TString, mangled_name);
    mangled_name = info->GetMangledName();
    return mangled_name;
 }

@@ -209,8 +209,8 @@ Bool_t TRFIOFile::ReadBuffers(char *buf, Long64_t *pos, Int_t *len, Int_t nbuf)
    // Read a list of buffers given in pos[] and len[] and return it
    // in a single buffer. Returns kTRUE in case of error.
 
-   thread_local struct iovec64 *iov = 0;
-   thread_local Int_t iovsize = 128;
+   TTHREAD_TLS(struct iovec64 *) iov = 0;
+   TTHREAD_TLS(Int_t) iovsize = 128;
    Int_t n;
 
    if (IsZombie()) {
@@ -260,8 +260,9 @@ Bool_t TRFIOFile::ReadBuffers(char *buf, Long64_t *pos, Int_t *len, Int_t nbuf)
       iov[n].iov_len  = len[n];
    }
 
-   // prefetch the stuff
-   if (rfio_preseek64(fD, iov, nbuf) < 0) {
+   // prefetch the stuff if preseek is supported,
+   // preseek support was removed from client and server in castor 2.1.15
+   if (rfio_preseek64(fD, iov, nbuf) < 0 && rfio_errno != SEOPNOTSUP) {
       Error("TRFIOFile", "error doing rfio_preseek64");
       return kTRUE;
    }

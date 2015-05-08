@@ -638,7 +638,9 @@ void ROOT::TMetaUtils::TNormalizedCtxtImpl::keepTypedef(const cling::LookupHelpe
    // if replace, replace occurrences of the canonical type by name.
    clang::QualType toSkip = lh.findType(name, cling::LookupHelper::WithDiagnostics);
    if (const clang::Type* T = toSkip.getTypePtr()) {
-      clang::Decl* D = llvm::dyn_cast<clang::TypedefType>(T)->getDecl();
+      const clang::TypedefType *tt = llvm::dyn_cast<clang::TypedefType>(T);
+      if (!tt) return;
+      clang::Decl* D = tt->getDecl();
       fConfig.m_toSkip.insert(D);
       if (replace) {
          clang::QualType canon = toSkip->getCanonicalTypeInternal();
@@ -1879,11 +1881,14 @@ void ROOT::TMetaUtils::WriteClassInit(std::ostream& finalString,
             break;
          case ROOT::kSTLmap:
          case ROOT::kSTLmultimap:
+         case ROOT::kSTLunorderedmap:
+         case ROOT::kSTLunorderedmultimap:
             methodTCP="MapInsert";
             break;
          case ROOT::kSTLset:
-         case ROOT::kSTLunorderedset:
          case ROOT::kSTLmultiset:
+         case ROOT::kSTLunorderedset:
+         case ROOT::kSTLunorderedmultiset:
             methodTCP="Insert";
             break;
       }
@@ -1896,7 +1901,7 @@ void ROOT::TMetaUtils::WriteClassInit(std::ostream& finalString,
    // Register Altenate spelling of the class name.
    //---------------------------------------------------------------------------
    if (cl.GetRequestedName()[0] && classname != cl.GetRequestedName()) {
-      finalString << "\n" << "      ROOT::AddClassAlternate(\""
+      finalString << "\n" << "      ::ROOT::AddClassAlternate(\""
                   << classname << "\",\"" << cl.GetRequestedName() << "\");\n";
    }
 
@@ -4614,7 +4619,8 @@ ROOT::ESTLType ROOT::TMetaUtils::STLKind(const llvm::StringRef type)
    // Converts STL container name to number. vector -> 1, etc..
 
    static const char *stls[] =                  //container names
-      {"any","vector","list", "deque","map","multimap","set","multiset","bitset","forward_list","unordered_set",0};
+      {"any","vector","list", "deque","map","multimap","set","multiset","bitset",
+         "forward_list","unordered_set","unordered_multiset","unordered_map","unordered_multimap",0};
    static const ROOT::ESTLType values[] =
       {ROOT::kNotSTL, ROOT::kSTLvector,
        ROOT::kSTLlist, ROOT::kSTLdeque,
@@ -4622,7 +4628,8 @@ ROOT::ESTLType ROOT::TMetaUtils::STLKind(const llvm::StringRef type)
        ROOT::kSTLset, ROOT::kSTLmultiset,
        ROOT::kSTLbitset,
        ROOT::kSTLforwardlist,
-       ROOT::kSTLunorderedset,
+       ROOT::kSTLunorderedset, ROOT::kSTLunorderedmultiset,
+       ROOT::kSTLunorderedmap, ROOT::kSTLunorderedmultimap,
        ROOT::kNotSTL
       };
    //              kind of stl container

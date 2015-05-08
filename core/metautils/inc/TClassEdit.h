@@ -91,18 +91,21 @@ namespace TClassEdit {
    };
 
    enum ESTLType {
-      kNotSTL       = ROOT::kNotSTL,
-      kVector       = ROOT::kSTLvector,
-      kList         = ROOT::kSTLlist,
-      kForwardist   = ROOT::kSTLforwardlist,
-      kDeque        = ROOT::kSTLdeque,
-      kMap          = ROOT::kSTLmap,
-      kMultiMap     = ROOT::kSTLmultimap,
-      kSet          = ROOT::kSTLset,
-      kUnorderedSet = ROOT::kSTLunorderedset,
-      kMultiSet     = ROOT::kSTLmultiset,
-      kBitSet       = ROOT::kSTLbitset,
-      kEnd          = ROOT::kSTLend
+      kNotSTL            = ROOT::kNotSTL,
+      kVector            = ROOT::kSTLvector,
+      kList              = ROOT::kSTLlist,
+      kForwardist        = ROOT::kSTLforwardlist,
+      kDeque             = ROOT::kSTLdeque,
+      kMap               = ROOT::kSTLmap,
+      kMultiMap          = ROOT::kSTLmultimap,
+      kSet               = ROOT::kSTLset,
+      kMultiSet          = ROOT::kSTLmultiset,
+      kUnorderedSet      = ROOT::kSTLunorderedset,
+      kUnorderedMultiSet = ROOT::kSTLunorderedmultiset,
+      kUnorderedMap      = ROOT::kSTLunorderedmap,
+      kUnorderedMultiMap = ROOT::kSTLunorderedmultimap,
+      kBitSet            = ROOT::kSTLbitset,
+      kEnd               = ROOT::kSTLend
    };
 
    enum class EComplexType : short {
@@ -157,7 +160,8 @@ namespace TClassEdit {
    bool        IsDefHash(const char *hashname, const char *classname);
    bool        IsInterpreterDetail(const char *type);
    bool        IsSTLBitset(const char *type);
-   ROOT::ESTLType IsSTLCont (const char *type);
+   ROOT::ESTLType UnderlyingIsSTLCont(std::string_view type);
+   ROOT::ESTLType IsSTLCont (std::string_view type);
    int         IsSTLCont (const char *type,int testAlloc);
    bool        IsStdClass(const char *type);
    bool        IsVectorBool(const char *name);
@@ -165,7 +169,7 @@ namespace TClassEdit {
    std::string GetLong64_Name(const char *original);
    std::string GetLong64_Name(const std::string& original);
    int         GetSplit  (const char *type, std::vector<std::string> &output, int &nestedLoc, EModType mode = TClassEdit::kNone);
-   ROOT::ESTLType STLKind   (const char *type, size_t len = 0);    //Kind of stl container
+   ROOT::ESTLType STLKind(std::string_view type);    //Kind of stl container
    int         STLArgs   (int kind);            //Min number of arguments without allocator
    std::string ResolveTypedef(const char *tname, bool resolveAll = false);
    std::string ShortType (const char *typeDesc, int mode);
