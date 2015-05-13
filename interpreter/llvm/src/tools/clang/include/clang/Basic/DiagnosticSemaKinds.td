@@ -364,9 +364,8 @@ def err_thread_unsupported : Error<
 def warn_maybe_falloff_nonvoid_function : Warning<
   "control may reach end of non-void function">,
   InGroup<ReturnType>;
-def warn_falloff_nonvoid_function : Warning<
-  "control reaches end of non-void function">,
-  InGroup<ReturnType>;
+def err_falloff_nonvoid_function : Error<
+  "control reaches end of non-void function">;
 def err_maybe_falloff_nonvoid_block : Error<
   "control may reach end of non-void block">;
 def err_falloff_nonvoid_block : Error<
