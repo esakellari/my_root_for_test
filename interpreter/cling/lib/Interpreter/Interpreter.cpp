@@ -16,6 +16,7 @@
 #include "IncrementalExecutor.h"
 #include "IncrementalParser.h"
 #include "MultiplexInterpreterCallbacks.h"
+#include "ASTImportSource.h"
 
 #include "cling/Interpreter/CIFactory.h"
 #include "cling/Interpreter/ClangInternalState.h"
@@ -25,7 +26,6 @@
 #include "cling/Interpreter/Transaction.h"
 #include "cling/Interpreter/Value.h"
 #include "cling/Utils/AST.h"
-#include "cling/Utils/ASTImportSource.h"
 #include "cling/Interpreter/AutoloadCallback.h"
 
 #include "clang/AST/ASTContext.h"
@@ -244,12 +244,12 @@ namespace cling {
     llvm::IntrusiveRefCntPtr <ExternalASTSource>
       astContextExternalSource(myExternalSource);
 
-    this->getCI()->getASTContext().ExternalSource.resetWithoutRelease();
-    this->getCI()->getASTContext().setExternalSource(astContextExternalSource);
+    getCI()->getASTContext().ExternalSource.resetWithoutRelease();
+    getCI()->getASTContext().setExternalSource(astContextExternalSource);
 
     // Inform the Translation Unit Decl of I2 that it has to
     // search somewhere else to find the declarations.
-    this->getCI()->getASTContext().getTranslationUnitDecl()->setHasExternalVisibleStorage();
+    getCI()->getASTContext().getTranslationUnitDecl()->setHasExternalVisibleStorage();
 
     // Give my IncrementalExecutor a pointer to the Incremental executor
     // of the parent Interpreter.
